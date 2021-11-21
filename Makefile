@@ -1,11 +1,17 @@
 CFLAGS += -std=c99 -Wall
-LDFLAGS += -ledit
-SRC := $(shell find -name '*.c')
-OBJ := $(shell find -name '*.o')
+LDFLAGS += -ledit -lm -Lmpc
+SRCDIR += src
+LIBDIR := mpc
+SRC := $(shell find $(SRCDIR) -name '*.c')
+OBJ := $(shell find $(SRCDIR) -name '*.o')
 BIN = lisp
 CLANG_FORMAT = clang-format-11
 
-build: $(SRC)
+lib:
+	make -C $(LIBDIR) build
+	make -C $(LIBDIR) build/libmpc.so
+
+build: lib $(SRC)
 	$(CC) $(CFLAGS) $(SRC) $(LDFLAGS) -o $(BIN)
 
 fmt:
@@ -13,5 +19,8 @@ fmt:
 
 clean:
 	@rm $(OBJ) $(BIN)
+
+clean-all:
+	make -C $(LIBDIR) clean
 
 all: fmt build
