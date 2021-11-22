@@ -1,17 +1,16 @@
-CFLAGS += -std=c99 -Wall
-LDFLAGS += -ledit -lm -Lmpc
+CFLAGS += -g -std=c99 -Wall -I/usr/local/share/mpc
+LDFLAGS += -ledit -lmpc -L/usr/local/lib/
 SRCDIR += src
-LIBDIR := mpc
 SRC := $(shell find $(SRCDIR) -name '*.c')
 OBJ := $(shell find $(SRCDIR) -name '*.o')
 BIN = lisp
 CLANG_FORMAT = clang-format-11
 
 lib:
-	make -C $(LIBDIR) build
-	make -C $(LIBDIR) build/libmpc.so
+	make -C mpc build/libmpc.so
+	mv mpc/build/libmpc.so mpc
 
-build: lib $(SRC)
+build: $(SRC)
 	$(CC) $(CFLAGS) $(SRC) $(LDFLAGS) -o $(BIN)
 
 fmt:
@@ -20,7 +19,12 @@ fmt:
 clean:
 	@rm $(OBJ) $(BIN)
 
-clean-all:
-	make -C $(LIBDIR) clean
+clean-lib:
+	make -C mpc clean
 
-all: fmt build
+clean-all: clean clean-lib
+
+all: build
+
+run:
+	LD_LIBRARY_PATH+=/usr/local/lib/ ./$(BIN)
