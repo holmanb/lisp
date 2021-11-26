@@ -19,7 +19,13 @@ enum {
 enum {
 	LERR_DIV_ZERO,
 	LERR_BAD_OP,
-	LERR_BAD_NUM
+	LERR_BAD_NUM,
+};
+
+enum {
+	FERR_TOO_MANY_ARGS,
+	FERR_TYPERR,
+	FERR_INVALID_ARG,
 };
 
 struct lval {
@@ -39,6 +45,10 @@ struct lval *lval_eval(struct lval *v);
 struct lval *lval_take(struct lval *v, int i);
 struct lval *lval_pop(struct lval *v, int i);
 struct lval *builtin_op(struct lval *a, char *op);
+struct lval *builtin_eval(struct lval *a);
+struct lval *builtin_join(struct lval *a);
+struct lval *builtin_list(struct lval *a);
+struct lval *builtin(struct lval *a, char *func);
 
 static struct lval *lval_num(long x)
 {
@@ -227,11 +237,18 @@ struct lval *lval_eval_sexpr(struct lval *v)
 	}
 
 	/* builtin */
-	struct lval *result = builtin_op(v, f->sym);
+	struct lval *result = builtin(v, f->sym); //builtin_op(v, f->sym);
 	lval_free(f);
 	return result;
 }
 
+struct lval *lval_join(struct lval *x, struct lval *y)
+{
+	while(y->count)
+		x = lval_add(x, lval_pop(y, 0));
+	lval_free(y);
+	return x;
+}
 
 struct lval *lval_eval(struct lval *v)
 {
@@ -299,6 +316,105 @@ struct lval *builtin_op(struct lval *a, char *op){
 	return x;
 }
 
+struct lval *lval_func_err(struct lval *a, const char *fname, const char *message)
+{
+	const char format[] = "Function '%s' %s";
+	struct lval *out;
+
+	char size = strlen(format) + strlen(fname) + strlen(message) + 1;
+	char *buf = malloc(size);
+	lval_free(a);
+	snprintf(buf, size, format, fname, message);
+	out = lval_err(buf);
+	free(buf);
+	return out;
+}
+
+struct lval *builtin_head(struct lval *a)
+{
+	const char fname[] = "head";
+	if (a->count != 1)
+		return lval_func_err(a, fname, "passed too many arguments!");
+	if (a->cell[0]->type != LVAL_QEXPR)
+		return lval_func_err(a, fname, "passed incorrect types");
+	if (a->cell[0]->count == 0)
+		return lval_func_err(a, fname, "passed {}");
+
+	struct lval *v = lval_take(a, 0);
+	while (v->count > 1)
+		lval_free(lval_pop(v, 1));
+	return v;
+}
+
+struct lval *builtin_tail(struct lval *a)
+{
+	const char fname[] = "tail";
+	if (a->count != 1)
+		return lval_func_err(a, fname, "passed too many arguments!");
+	if (a->cell[0]->type != LVAL_QEXPR)
+		return lval_func_err(a, fname, "passed incorrect types");
+	if (a->cell[0]->count == 0)
+		return lval_func_err(a, fname, "passed {}");
+
+	struct lval *v = lval_take(a, 0);
+	lval_free(lval_pop(v, 0));
+	return v;
+}
+
+struct lval *builtin_list(struct lval *a)
+{
+	a->type = LVAL_QEXPR;
+	return a;
+}
+
+struct lval *builtin_eval(struct lval *a)
+{
+	const char fname[] = "eval";
+	if (a->count != 1)
+		return lval_func_err(a, fname, "passed too many arguments");
+	if (a->cell[0]->type != LVAL_QEXPR)
+		return lval_func_err(a, fname, "passed incorrect type!");
+
+	struct lval *x = lval_take(a, 0);
+	x->type = LVAL_SEXPR;
+	return lval_eval(x);
+}
+
+struct lval *builtin_join(struct lval *a)
+{
+	int i;
+	const char fname[] = "join";
+	for (i = 0; i < a->count; i++)
+	{
+		if (a->cell[i]->type != LVAL_QEXPR)
+			return lval_func_err(a, fname, "passed incorrect type");
+	}
+	struct lval *x = lval_pop(a, 0);
+
+	while (a->count)
+		x = lval_join(x, lval_pop(a, 0));
+
+	lval_free(a);
+	return x;
+}
+
+struct lval *builtin(struct lval *a, char *func)
+{
+	if (strcmp("list", func) == 0)
+		return builtin_list(a);
+	if (strcmp("head", func) == 0)
+		return builtin_head(a);
+	if (strcmp("tail", func) == 0)
+		return builtin_tail(a);
+	if (strcmp("join", func) == 0)
+		return builtin_join(a);
+	if (strcmp("eval", func) == 0)
+		return builtin_eval(a);
+	if (strstr("+-/*", func))
+		return builtin_op(a, func);
+	lval_free(a);
+	return lval_err("Unknown Function!");
+}
 
 int main(int argc, char *argv[])
 {
@@ -317,7 +433,8 @@ int main(int argc, char *argv[])
 	mpca_lang(MPCA_LANG_DEFAULT,
 		"                                                   \
 		number   : /-?[0-9]+/ ;                             \
-		symbol   : '+' | '-' | '*' | '/' ;                  \
+		symbol   : '+' | '-' | '*' | '/' | \"list\" |       \
+		          \"head\" | \"tail\" | \"join\" | \"eval\";\
 		sexpr     : '(' <expr>* ')' ;                       \
 		qexpr     : '{' <expr>* '}' ;                       \
 		expr     : <number> | <symbol> | <sexpr> | <qexpr>; \
