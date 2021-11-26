@@ -18,8 +18,10 @@ build: $(SRC)
 fmt:
 	$(CLANG_FORMAT) -i $(SRC)
 
+tags:
+	ctags -R .
 clean:
-	@rm $(OBJ) $(BIN)
+	@rm $(OBJ) $(BIN) tags
 
 clean-lib:
 	make -C mpc clean
