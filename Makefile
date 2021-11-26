@@ -6,6 +6,8 @@ OBJ := $(shell find $(SRCDIR) -name '*.o')
 BIN = lisp
 CLANG_FORMAT = clang-format-11
 
+all: build
+
 lib:
 	make -C mpc build/libmpc.so
 	mv mpc/build/libmpc.so mpc
@@ -23,8 +25,6 @@ clean-lib:
 	make -C mpc clean
 
 clean-all: clean clean-lib
-
-all: build
 
 run:
 	LD_LIBRARY_PATH+=/usr/local/lib/ ./$(BIN)

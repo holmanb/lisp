@@ -98,20 +98,20 @@ static void lval_free(struct lval *v)
 {
 	int i;
 	switch (v->type) {
-		case LVAL_ERR:
-			free(v->err);
-			break;
-		case LVAL_SYM:
-			free(v->sym);
-			break;
-		case LVAL_SEXPR: /* fall through */
-		case LVAL_QEXPR:
-			for (i=0; i < v-> count; i++)
-				lval_free(v->cell[i]);
-			free(v->cell);
-			break;
-		case LVAL_NUM:
-			break;
+	case LVAL_ERR:
+		free(v->err);
+		break;
+	case LVAL_SYM:
+		free(v->sym);
+		break;
+	case LVAL_SEXPR: /* fall through */
+	case LVAL_QEXPR:
+		for (i = 0; i < v->count; i++)
+			lval_free(v->cell[i]);
+		free(v->cell);
+		break;
+	case LVAL_NUM:
+		break;
 	}
 	free(v);
 }
@@ -120,8 +120,7 @@ static struct lval *lval_read_num(mpc_ast_t *t)
 {
 	errno = 0;
 	long x = strtol(t->contents, NULL, 10);
-	return errno != ERANGE ?
-		lval_num(x) : lval_err("invalid number");
+	return errno != ERANGE ? lval_num(x) : lval_err("invalid number");
 }
 
 static struct lval *lval_add(struct lval *v, struct lval *x)
@@ -132,8 +131,8 @@ static struct lval *lval_add(struct lval *v, struct lval *x)
 	return v;
 }
 
-static struct lval *lval_read(mpc_ast_t *t){
-
+static struct lval *lval_read(mpc_ast_t *t)
+{
 	int i;
 
 	/* return conversion to type */
@@ -184,44 +183,48 @@ static void lval_expr_print(struct lval *v, char open, char close)
 
 static void lval_print(struct lval *v)
 {
-	switch(v->type) {
-		case LVAL_NUM:
-			printf("%li", v->num);
-			break;
-		case LVAL_ERR:
-			printf("Err: %s", v->err);
-			break;
-		case LVAL_SYM:
-			printf("%s", v->sym);
-			break;
-		case LVAL_SEXPR:
-			lval_expr_print(v, '(', ')');
-			break;
-		case LVAL_QEXPR:
-			lval_expr_print(v, '{', '}');
-			break;
+	switch (v->type) {
+	case LVAL_NUM:
+		printf("%li", v->num);
+		break;
+	case LVAL_ERR:
+		printf("Err: %s", v->err);
+		break;
+	case LVAL_SYM:
+		printf("%s", v->sym);
+		break;
+	case LVAL_SEXPR:
+		lval_expr_print(v, '(', ')');
+		break;
+	case LVAL_QEXPR:
+		lval_expr_print(v, '{', '}');
+		break;
 	}
 }
 
-static void lval_println(struct lval *v) { lval_print(v); putchar('\n'); }
+static void lval_println(struct lval *v)
+{
+	lval_print(v);
+	putchar('\n');
+}
 
 struct lval *lval_eval_sexpr(struct lval *v)
 {
 	int i;
 
 	/* eval children*/
-	for (i = 0; i < v-> count; i++) {
+	for (i = 0; i < v->count; i++) {
 		v->cell[i] = lval_eval(v->cell[i]);
 	}
 
 	/* error check */
-	for (i=0; i < v->count; i++){
-		if(v->cell[i]->type == LVAL_ERR)
+	for (i = 0; i < v->count; i++) {
+		if (v->cell[i]->type == LVAL_ERR)
 			return lval_take(v, i);
 	}
 
 	/* empty expressions */
-	if(v->count == 0)
+	if (v->count == 0)
 		return v;
 
 	/* single expressions */
@@ -230,7 +233,7 @@ struct lval *lval_eval_sexpr(struct lval *v)
 
 	/* ensure first elem is symb */
 	struct lval *f = lval_pop(v, 0);
-	if (f->type != LVAL_SYM){
+	if (f->type != LVAL_SYM) {
 		lval_free(f);
 		lval_free(v);
 		return lval_err("S-expression must start with symbol!");
@@ -244,7 +247,7 @@ struct lval *lval_eval_sexpr(struct lval *v)
 
 struct lval *lval_join(struct lval *x, struct lval *y)
 {
-	while(y->count)
+	while (y->count)
 		x = lval_add(x, lval_pop(y, 0));
 	lval_free(y);
 	return x;
@@ -260,7 +263,8 @@ struct lval *lval_eval(struct lval *v)
 struct lval *lval_pop(struct lval *v, int i)
 {
 	struct lval *x = v->cell[i];
-	memmove(&v->cell[i], &v->cell[i+1], sizeof(struct lval *) * (v->count - i - 1));
+	memmove(&v->cell[i], &v->cell[i + 1],
+		sizeof(struct lval *) * (v->count - i - 1));
 	v->count--;
 	v->cell = realloc(v->cell, sizeof(struct lval *) * v->count);
 	return x;
@@ -273,13 +277,13 @@ struct lval *lval_take(struct lval *v, int i)
 	return x;
 }
 
-struct lval *builtin_op(struct lval *a, char *op){
+struct lval *builtin_op(struct lval *a, char *op)
+{
 	int i;
-	for (i=0; i<a->count; i++){
-		if(a->cell[i]->type != LVAL_NUM){
+	for (i = 0; i < a->count; i++) {
+		if (a->cell[i]->type != LVAL_NUM) {
 			lval_free(a);
 			return lval_err("Cannot operate on non-number!");
-
 		}
 	}
 
@@ -305,8 +309,6 @@ struct lval *builtin_op(struct lval *a, char *op){
 				lval_free(y);
 				x = lval_err("Division By Zero!");
 				break;
-
-
 			}
 			x->num /= y->num;
 		}
@@ -316,7 +318,8 @@ struct lval *builtin_op(struct lval *a, char *op){
 	return x;
 }
 
-struct lval *lval_func_err(struct lval *a, const char *fname, const char *message)
+struct lval *lval_func_err(struct lval *a, const char *fname,
+			   const char *message)
 {
 	const char format[] = "Function '%s' %s";
 	struct lval *out;
@@ -384,8 +387,7 @@ struct lval *builtin_join(struct lval *a)
 {
 	int i;
 	const char fname[] = "join";
-	for (i = 0; i < a->count; i++)
-	{
+	for (i = 0; i < a->count; i++) {
 		if (a->cell[i]->type != LVAL_QEXPR)
 			return lval_func_err(a, fname, "passed incorrect type");
 	}
@@ -431,7 +433,7 @@ int main(int argc, char *argv[])
 
 	/* Define them with the following Language */
 	mpca_lang(MPCA_LANG_DEFAULT,
-		"                                                   \
+		  "                                                   \
 		number   : /-?[0-9]+/ ;                             \
 		symbol   : '+' | '-' | '*' | '/' | \"list\" |       \
 		          \"head\" | \"tail\" | \"join\" | \"eval\";\
