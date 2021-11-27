@@ -58,6 +58,11 @@ static struct lval *builtin_join(struct lenv *, struct lval *);
 static struct lval *builtin_list(struct lenv *, struct lval *);
 static struct lval *builtin_head(struct lenv *, struct lval *);
 static struct lval *builtin_tail(struct lenv *, struct lval *);
+struct lval *builtin_add(struct lenv *, struct lval *);
+struct lval *builtin_sub(struct lenv *, struct lval *);
+struct lval *builtin_mul(struct lenv *, struct lval *);
+struct lval *builtin_div(struct lenv *, struct lval *);
+struct lval *builtin_def(struct lenv *, struct lval *);
 static struct lval *lenv_get(struct lenv *, struct lval *);
 
 /* lval constructors */
@@ -191,13 +196,15 @@ static void lval_expr_print(struct lval *v, char open, char close)
 {
 	int i;
 	putchar(open);
-
+	if (v->count == 0)
+		goto end;
 	/* print trailing space for all but last element */
 	for (i = 0; i < v->count - 1; i++) {
 		lval_print(v->cell[i]);
 		putchar(' ');
 	}
 	lval_print(v->cell[i]);
+end:
 	putchar(close);
 }
 
@@ -306,67 +313,6 @@ struct lval *lval_take(struct lval *v, int i)
 	struct lval *x = lval_pop(v, i);
 	lval_free(v);
 	return x;
-}
-
-struct lval *builtin_op(struct lenv *e, struct lval *a, char *op)
-{
-	int i;
-	for (i = 0; i < a->count; i++) {
-		if (a->cell[i]->type != LVAL_NUM) {
-			lval_free(a);
-			return lval_err("Cannot operate on non-number!");
-		}
-	}
-
-	struct lval *x = lval_pop(a, 0);
-
-	/* unary negation */
-	if ((strcmp(op, "-") == 0) && a->count == 0) {
-		x->num = -x->num;
-	}
-
-	while (a->count > 0) {
-		struct lval *y = lval_pop(a, 0);
-
-		if (strcmp(op, "+") == 0)
-			x->num += y->num;
-		if (strcmp(op, "-") == 0)
-			x->num -= y->num;
-		if (strcmp(op, "*") == 0)
-			x->num *= y->num;
-		if (strcmp(op, "/") == 0) {
-			if (y->num == 0) {
-				lval_free(x);
-				lval_free(y);
-				x = lval_err("Division By Zero!");
-				break;
-			}
-			x->num /= y->num;
-		}
-		lval_free(y);
-	}
-	lval_free(a);
-	return x;
-}
-
-struct lval *builtin_add(struct lenv *e, struct lval *a)
-{
-	return builtin_op(e, a, "+");
-}
-
-struct lval *builtin_sub(struct lenv *e, struct lval *a)
-{
-	return builtin_op(e, a, "-");
-}
-
-struct lval *builtin_mul(struct lenv *e, struct lval *a)
-{
-	return builtin_op(e, a, "*");
-}
-
-struct lval *builtin_div(struct lenv *e, struct lval *a)
-{
-	return builtin_op(e, a, "/");
 }
 
 struct lval *lval_func_err(struct lval *a, const char *fname,
@@ -503,15 +449,78 @@ static void lenv_add_builtins(struct lenv *e)
 	lenv_add_builtin(e, "tail", builtin_tail);
 	lenv_add_builtin(e, "eval", builtin_eval);
 	lenv_add_builtin(e, "join", builtin_join);
+	lenv_add_builtin(e, "def", builtin_def);
 
 	/* math functions */
 	lenv_add_builtin(e, "+", builtin_add);
 	lenv_add_builtin(e, "-", builtin_sub);
-	lenv_add_builtin(e, "+", builtin_mul);
+	lenv_add_builtin(e, "*", builtin_mul);
 	lenv_add_builtin(e, "/", builtin_div);
 }
 
-/* builtin funcs */
+struct lval *builtin_op(struct lenv *e, struct lval *a, char *op)
+{
+	int i;
+	for (i = 0; i < a->count; i++) {
+		if (a->cell[i]->type != LVAL_NUM) {
+			lval_free(a);
+			return lval_err("Cannot operate on non-number!");
+		}
+	}
+
+	struct lval *x = lval_pop(a, 0);
+
+	/* unary negation */
+	if ((strcmp(op, "-") == 0) && a->count == 0) {
+		x->num = -x->num;
+	}
+
+	while (a->count > 0) {
+		struct lval *y = lval_pop(a, 0);
+
+		if (strcmp(op, "+") == 0)
+			x->num += y->num;
+		if (strcmp(op, "-") == 0)
+			x->num -= y->num;
+		if (strcmp(op, "*") == 0)
+			x->num *= y->num;
+		if (strcmp(op, "/") == 0) {
+			if (y->num == 0) {
+				lval_free(x);
+				lval_free(y);
+				x = lval_err("Division By Zero!");
+				break;
+			}
+			x->num /= y->num;
+		}
+		lval_free(y);
+	}
+	lval_free(a);
+	return x;
+}
+
+/* builtin math ops */
+struct lval *builtin_add(struct lenv *e, struct lval *a)
+{
+	return builtin_op(e, a, "+");
+}
+
+struct lval *builtin_sub(struct lenv *e, struct lval *a)
+{
+	return builtin_op(e, a, "-");
+}
+
+struct lval *builtin_mul(struct lenv *e, struct lval *a)
+{
+	return builtin_op(e, a, "*");
+}
+
+struct lval *builtin_div(struct lenv *e, struct lval *a)
+{
+	return builtin_op(e, a, "/");
+}
+
+/* builtin q-expr funcs */
 struct lval *builtin_head(struct lenv *e, struct lval *a)
 {
 	const char fname[] = "head";
@@ -577,6 +586,32 @@ struct lval *builtin_join(struct lenv *e, struct lval *a)
 
 	lval_free(a);
 	return x;
+}
+
+/* def builtin */
+struct lval *builtin_def(struct lenv *e, struct lval *a)
+{
+	int i;
+	const char fname[] = "def";
+	if (a->cell[0]->type != LVAL_QEXPR)
+		lval_func_err(a, fname, "passed incorrect type!");
+
+	/* first arg is symbol list */
+	struct lval *syms = a->cell[0];
+	for (i = 0; i < syms->count; i++)
+		if (syms->cell[i]->type != LVAL_SYM)
+			lval_func_err(a, fname, "cannot define non-symbol");
+
+	if (syms->count != a->count - 1)
+		lval_func_err(
+			a, fname,
+			"cannot define incorrect number of values to symbols");
+
+	/* assign copies of values to symbols */
+	for (i = 0; i < syms->count; i++)
+		lenv_put(e, syms->cell[i], a->cell[i + 1]);
+	lval_free(a);
+	return lval_sexpr();
 }
 
 int main(int argc, char *argv[])
