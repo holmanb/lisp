@@ -1,0 +1,7 @@
+-g
+-std=c99
+-Wall
+-I/usr/local/share/mpc
+-ledit
+-lmpc
+-L/usr/local/lib/
