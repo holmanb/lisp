@@ -1,6 +1,8 @@
-#include <stdio.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <stdarg.h>
+#include <string.h>
+#include <errno.h>
 
 #include <editline/readline.h>
 #include <editline/history.h>
@@ -44,6 +46,30 @@ struct lenv;
 
 typedef struct lval *(*lbuiltin)(struct lenv *, struct lval *);
 
+char *String(char *s, ...);
+static char *fmt(const char *fmt, ...);
+static char *ltype_name(int t);
+static void lval_print(struct lval *);
+static char *lval_to_str(struct lval *v);
+static void lval_expr_print(struct lval *, char open, char close);
+static char *lval_expr_to_str(struct lval *, char open, char close);
+static struct lval *lval_eval(struct lenv *, struct lval *);
+static struct lval *lval_take(struct lval *, int i);
+static struct lval *lval_pop(struct lval *, int i);
+static struct lval *lenv_get(struct lenv *, struct lval *);
+static struct lval *lval_err(const char *fmt, ...);
+static struct lval *builtin_op(struct lenv *, struct lval *, char *, char *);
+static struct lval *builtin_eval(struct lenv *, struct lval *);
+static struct lval *builtin_join(struct lenv *, struct lval *);
+static struct lval *builtin_list(struct lenv *, struct lval *);
+static struct lval *builtin_head(struct lenv *, struct lval *);
+static struct lval *builtin_tail(struct lenv *, struct lval *);
+static struct lval *builtin_add(struct lenv *, struct lval *);
+static struct lval *builtin_sub(struct lenv *, struct lval *);
+static struct lval *builtin_mul(struct lenv *, struct lval *);
+static struct lval *builtin_div(struct lenv *, struct lval *);
+static struct lval *builtin_def(struct lenv *, struct lval *);
+
 struct lval {
 	int type;
 
@@ -77,29 +103,6 @@ struct lenv {
 	struct lval **vals;
 };
 
-char *String(char *s, ...);
-static void lval_expr_print(struct lval *, char open, char close);
-static char *lval_expr_to_str(struct lval *, char open, char close);
-static char *lval_to_str(struct lval *v);
-static void lval_print(struct lval *);
-static struct lval *lval_eval(struct lenv *, struct lval *);
-static struct lval *lval_take(struct lval *, int i);
-static struct lval *lval_pop(struct lval *, int i);
-static struct lval *lenv_get(struct lenv *, struct lval *);
-static struct lval *lval_err(const char *fmt, ...);
-static struct lval *builtin_op(struct lenv *, struct lval *, char *, char *);
-static struct lval *builtin_eval(struct lenv *, struct lval *);
-static struct lval *builtin_join(struct lenv *, struct lval *);
-static struct lval *builtin_list(struct lenv *, struct lval *);
-static struct lval *builtin_head(struct lenv *, struct lval *);
-static struct lval *builtin_tail(struct lenv *, struct lval *);
-static struct lval *builtin_add(struct lenv *, struct lval *);
-static struct lval *builtin_sub(struct lenv *, struct lval *);
-static struct lval *builtin_mul(struct lenv *, struct lval *);
-static struct lval *builtin_div(struct lenv *, struct lval *);
-static struct lval *builtin_def(struct lenv *, struct lval *);
-static char *ltype_name(int t);
-
 /* lval constructors */
 static struct lval *lval_num(long x)
 {
@@ -107,17 +110,6 @@ static struct lval *lval_num(long x)
 	v->type = LVAL_NUM;
 	v->num = x;
 	return v;
-}
-
-static char *fmt(const char *fmt, ...)
-{
-	const int size = 512;
-	va_list va;
-	va_start(va, fmt);
-	void *buf = xmalloc(size);
-	vsnprintf(buf, size, fmt, va);
-	va_end(va);
-	return buf;
 }
 
 static struct lval *lval_err(const char *fmt, ...)
@@ -304,6 +296,17 @@ char *String(char *s, ...)
 	/* Reallocate to number of bytes actually used */
 	buf = realloc(buf, strlen(buf) + 1);
 
+	return buf;
+}
+
+static char *fmt(const char *fmt, ...)
+{
+	const int size = 512;
+	va_list va;
+	va_start(va, fmt);
+	void *buf = xmalloc(size);
+	vsnprintf(buf, size, fmt, va);
+	va_end(va);
 	return buf;
 }
 
