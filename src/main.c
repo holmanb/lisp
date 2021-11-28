@@ -76,6 +76,8 @@ static struct lval *builtin_var(struct lenv *, struct lval *, char *fname);
 static struct lval *builtin_lambda(struct lenv *e, struct lval *a);
 static struct lval *builtin_put(struct lenv *e, struct lval *a);
 static void lval_free(struct lval *v);
+struct lval *lval_func_err(struct lval *a, const char *fname,
+			   const char *message, ...);
 static struct lenv *lenv_new(void);
 static struct lval *lenv_get(struct lenv *, struct lval *);
 static struct lenv *lenv_copy(struct lenv *e);
@@ -151,6 +153,23 @@ static struct lval *lval_call(struct lenv *e, struct lval *f, struct lval *a)
 
 		/* pop first symbol from formals list */
 		struct lval *sym = lval_pop(f->formals, 0);
+
+		/* add support for variable arguments via '&' symbol*/
+		if (strcmp(sym->sym, "&") == 0) {
+			if (f->formals->count != 1) {
+				lval_free(a);
+				return lval_func_err(
+					f->formals, fname,
+					"& must be followed by another symbol");
+			}
+
+			/* Bind variable formal to remaining args */
+			struct lval *nsym = lval_pop(f->formals, 0);
+			lenv_put(f->env, nsym, builtin_list(e, a));
+			lval_free(sym);
+			lval_free(nsym);
+			break;
+		}
 
 		/* pop first arg from list */
 		struct lval *val = lval_pop(a, 0);
