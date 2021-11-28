@@ -31,6 +31,7 @@ enum {
 	LVAL_ERR,
 	LVAL_NUM,
 	LVAL_SYM,
+	LVAL_STR,
 	LVAL_FUN,
 	LVAL_SEXPR,
 	LVAL_QEXPR,
@@ -63,6 +64,7 @@ static struct lval *lval_copy(struct lval *v);
 static struct lval *lval_take(struct lval *, int i);
 static struct lval *lval_pop(struct lval *, int i);
 static struct lval *lval_call(struct lenv *, struct lval *, struct lval *);
+static struct lval *lval_str(char *s);
 static struct lval *lval_err(const char *fmt, ...);
 
 static struct lval *builtin_assert(struct lenv *, struct lval *);
@@ -138,6 +140,7 @@ struct lval {
 		/* basic */
 		union {
 			char *sym;
+			char *str;
 			char *err;
 			long num;
 		};
@@ -259,6 +262,29 @@ static struct lval *lval_sym(char *s)
 	return v;
 }
 
+/* TODO: use strncpy() here instead */
+static struct lval *lval_read_str(mpc_ast_t *t)
+{
+	t->contents[strlen(t->contents) - 1] = '\0';
+	char *unescaped = malloc(strlen(t->contents + 1) + 1);
+	strcpy(unescaped, t->contents + 1);
+
+	/* pass through the unescape function */
+	unescaped = mpcf_unescape(unescaped);
+	struct lval *str = lval_str(unescaped);
+	free(unescaped);
+	return str;
+}
+
+static struct lval *lval_str(char *s)
+{
+	struct lval *v = xmalloc(sizeof(struct lval));
+	v->type = LVAL_STR;
+	v->sym = xmalloc(strlen(s) + 1);
+	strcpy(v->sym, s);
+	return v;
+}
+
 static struct lval *lval_sexpr(void)
 {
 	struct lval *v = xmalloc(sizeof(struct lval));
@@ -307,6 +333,9 @@ static void lval_free(struct lval *v)
 	case LVAL_SYM:
 		free(v->sym);
 		break;
+	case LVAL_STR:
+		free(v->str);
+		break;
 	case LVAL_SEXPR: /* fall through */
 	case LVAL_QEXPR:
 		for (i = 0; i < v->count; i++)
@@ -350,6 +379,8 @@ static struct lval *lval_read(mpc_ast_t *t)
 		return lval_read_num(t);
 	if (strstr(t->tag, "symbol"))
 		return lval_sym(t->contents);
+	if (strstr(t->tag, "string"))
+		return lval_read_str(t);
 
 	/* create empty list */
 	struct lval *x = NULL;
@@ -371,6 +402,8 @@ static struct lval *lval_read(mpc_ast_t *t)
 		if (strcmp(t->children[i]->contents, "}") == 0)
 			continue;
 		if (strcmp(t->children[i]->tag, "regex") == 0)
+			continue;
+		if (strstr(t->children[i]->tag, "comment"))
 			continue;
 		x = lval_add(x, lval_read(t->children[i]));
 	}
@@ -451,6 +484,21 @@ static char *fmt(const char *fmt, ...)
 	return buf;
 }
 
+static char * lval_str_to_str(struct lval *v)
+{
+	char *escaped = xmalloc(strlen(v->str) + 1);
+	strcpy(escaped, v->str);
+	escaped = mpcf_escape(escaped);
+	return escaped;
+}
+
+static void lval_print_str(struct lval *v)
+{
+	char *escaped = lval_str_to_str(v);
+	printf("\"%s\"", escaped);
+	free(escaped);
+}
+
 /* returns a str representation of an lval for internal usage
  *
  * @param v: lval to convert
@@ -467,6 +515,8 @@ static char *lval_to_str(struct lval *v)
 		return String("%s", v->sym);
 	case LVAL_SEXPR:
 		return lval_expr_to_str(v, '(', ')');
+	case LVAL_STR:
+		return lval_str_to_str(v);
 	case LVAL_QEXPR:
 		return lval_expr_to_str(v, '{', '}');
 	case LVAL_FUN:
@@ -496,6 +546,9 @@ static void lval_print(struct lval *v)
 		break;
 	case LVAL_SYM:
 		printf("%s", v->sym);
+		break;
+	case LVAL_STR:
+		lval_print_str(v);
 		break;
 	case LVAL_SEXPR:
 		lval_expr_print(v, '(', ')');
@@ -651,6 +704,10 @@ static struct lval *lval_copy(struct lval *v)
 	case LVAL_SYM:
 		x->sym = xmalloc(strlen(v->sym) + 1);
 		strcpy(x->sym, v->sym);
+		break;
+	case LVAL_STR:
+		x->sym = xmalloc(strlen(v->str) + 1);
+		strcpy(x->str, v->str);
 		break;
 
 	/* copy lists */
@@ -1153,6 +1210,8 @@ static int lval_eq(struct lval *x, struct lval *y)
 		return strcmp(x->err, y->err) == 0;
 	case LVAL_SYM:
 		return strcmp(x->sym, y->sym) == 0;
+	case LVAL_STR:
+		return strcmp(x->str, y->str) == 0;
 	case LVAL_SEXPR: /* fallthrough */
 	case LVAL_QEXPR:
 		if (x->count != y->count)
@@ -1395,6 +1454,8 @@ char *ltype_name(int t)
 		return "Error";
 	case LVAL_SYM:
 		return "Symbol";
+	case LVAL_STR:
+		return "String";
 	case LVAL_SEXPR:
 		return "S-Expression";
 	case LVAL_QEXPR:
@@ -1412,6 +1473,8 @@ int main(int argc, char *argv[])
 	/* Create Some Parsers */
 	mpc_parser_t *Number = mpc_new("number");
 	mpc_parser_t *Symbol = mpc_new("symbol");
+	mpc_parser_t *String = mpc_new("string");
+	mpc_parser_t *Comment = mpc_new("comment");
 	mpc_parser_t *Sexpr = mpc_new("sexpr");
 	mpc_parser_t *Qexpr = mpc_new("qexpr");
 	mpc_parser_t *Expr = mpc_new("expr");
@@ -1421,13 +1484,16 @@ int main(int argc, char *argv[])
 	mpca_lang(MPCA_LANG_DEFAULT,
 		  "                                                 \
 		number   : /-?[0-9]+/ ;                             \
+		string   : /\"(\\\\.|[^\"])*\"/ ;                   \
+		comment  : /;[^\\r\\n]*/ ;                          \
 		symbol   : /[a-zA-Z0-9_+\\-*\\/\\\\=<>!&%^~|]+/ ;   \
-		sexpr     : '(' <expr>* ')' ;                       \
-		qexpr     : '{' <expr>* '}' ;                       \
-		expr     : <number> | <symbol> | <sexpr> | <qexpr>; \
+		sexpr    : '(' <expr>* ')' ;                        \
+		qexpr    : '{' <expr>* '}' ;                        \
+		expr     : <number> | <symbol> | <string> |         \
+		           <comment> | <sexpr> | <qexpr>;           \
 		lisp    : /^/ <expr>* /$/ ;                         \
 		",
-		  Number, Symbol, Sexpr, Qexpr, Expr, Lisp);
+		  Number, String, Comment, Symbol, Sexpr, Qexpr, Expr, Lisp);
 	struct lenv *env = lenv_new();
 	lenv_add_builtins(env);
 	while (1) {
@@ -1445,6 +1511,6 @@ int main(int argc, char *argv[])
 		}
 	}
 	lenv_free(env);
-	mpc_cleanup(5, Number, Symbol, Sexpr, Qexpr, Expr, Lisp);
+	mpc_cleanup(8, Number, Symbol, String, Comment, Sexpr, Qexpr, Expr, Lisp);
 	return 0;
 }
