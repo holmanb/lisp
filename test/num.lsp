@@ -4,6 +4,18 @@
 (assert {} {})
 (assert "test" "test")
 
+; Equality Ops
+(assert (== 1000 1000) 1)
+(assert (!= 1000 1001) 1)
+
+; Order
+(assert (> 1 0) 1)
+(assert (> 0 -1) 1)
+(assert (>= 57 56) 1)
+(assert (>= 57 57) 1)
+(assert (<= 57 57) 1)
+(assert (<= 56 57) 1)
+
 ; Math
 (assert (+ 1 1) 2)
 (assert (+ 11 22 33) 66)
@@ -12,7 +24,7 @@
 (assert (* 2 3 4) 24)
 (assert (% 55 33) 22)
 (assert (- 1) -1)
-;(assert (\ 33 3) 11)
+(assert (/ 33 3) 11)
 
 ; Logical
 (assert (&& 1 1) 1)
@@ -55,4 +67,3 @@
 
 (assert (~ 1) -2)
 (assert (~ 0) -1)
-
