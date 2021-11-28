@@ -3,6 +3,7 @@
 #include <stdarg.h>
 #include <string.h>
 #include <errno.h>
+#include <stdbool.h>
 
 #include <editline/readline.h>
 #include <editline/history.h>
@@ -46,13 +47,15 @@ struct lenv;
 
 typedef struct lval *(*lbuiltin)(struct lenv *, struct lval *);
 
-char *String(char *, ...);
+static char *String(char *, ...);
 static char *fmt(const char *, ...);
 static char *ltype_name(int);
 static void lval_print(struct lval *);
-static char *lval_to_str(struct lval *v);
 static void lval_expr_print(struct lval *, char open, char close);
+static char *lval_to_str(struct lval *v);
 static char *lval_expr_to_str(struct lval *, char open, char close);
+
+static struct lval *lval_num(long x);
 static struct lval *lval_sexpr(void);
 static struct lval *lval_add(struct lval *v, struct lval *x);
 static struct lval *lval_eval(struct lenv *, struct lval *);
@@ -61,34 +64,58 @@ static struct lval *lval_take(struct lval *, int i);
 static struct lval *lval_pop(struct lval *, int i);
 static struct lval *lval_call(struct lenv *, struct lval *, struct lval *);
 static struct lval *lval_err(const char *fmt, ...);
+
 static struct lval *builtin_op(struct lenv *, struct lval *, char *, char *);
 static struct lval *builtin_eval(struct lenv *, struct lval *);
+
 static struct lval *builtin_join(struct lenv *, struct lval *);
 static struct lval *builtin_list(struct lenv *, struct lval *);
 static struct lval *builtin_head(struct lenv *, struct lval *);
 static struct lval *builtin_tail(struct lenv *, struct lval *);
+
 static struct lval *builtin_add(struct lenv *, struct lval *);
 static struct lval *builtin_sub(struct lenv *, struct lval *);
 static struct lval *builtin_mul(struct lenv *, struct lval *);
 static struct lval *builtin_div(struct lenv *, struct lval *);
+
 static struct lval *builtin_def(struct lenv *, struct lval *);
-static struct lval *builtin_var(struct lenv *, struct lval *, char *fname);
-static struct lval *builtin_lambda(struct lenv *e, struct lval *a);
-static struct lval *builtin_put(struct lenv *e, struct lval *a);
-static void lval_free(struct lval *v);
-struct lval *lval_func_err(struct lval *a, const char *fname,
-			   const char *message, ...);
+static struct lval *builtin_var(struct lenv *, struct lval *, char *);
+static struct lval *builtin_lambda(struct lenv *, struct lval *);
+static struct lval *builtin_put(struct lenv *, struct lval *);
+
+static struct lval *builtin_order(struct lenv *, struct lval *, char *);
+static struct lval *builtin_eq(struct lenv *e, struct lval *a);
+static struct lval *builtin_ne(struct lenv *e, struct lval *a);
+static struct lval *builtin_le(struct lenv *e, struct lval *a);
+static struct lval *builtin_lt(struct lenv *e, struct lval *a);
+static struct lval *builtin_ge(struct lenv *e, struct lval *a);
+static struct lval *builtin_gt(struct lenv *e, struct lval *a);
+
+static struct lval *builtin_if(struct lenv *e, struct lval *a);
+
+static struct lval *builtin_or(struct lenv *e, struct lval *a);
+static struct lval *builtin_and(struct lenv *e, struct lval *a);
+static struct lval *builtin_not(struct lenv *e, struct lval *a);
+
+static int lval_eq(struct lval *, struct lval *);
+static void lval_free(struct lval *);
+struct lval *lval_func_err(struct lval *, const char *, const char *, ...);
 static struct lenv *lenv_new(void);
 static struct lval *lenv_get(struct lenv *, struct lval *);
 static struct lenv *lenv_copy(struct lenv *e);
 static void lenv_put(struct lenv *e, struct lval *k, struct lval *v);
 static void lenv_free(struct lenv *e);
-struct lval *lerr_args_num(struct lval *, const char *, char *, int expected,
-			   int received);
-struct lval *lerr_args_num(struct lval *, const char *, char *, int, int);
-struct lval *lerr_args_too_many(struct lval *, const char *, int, int);
-struct lval *lerr_args_too_few(struct lval *, const char *, int, int);
-struct lval *lerr_args_type(struct lval *, const char *, int, int);
+
+static struct lval *lerr_args_num(struct lval *lval, const char *fname,
+				  char *num_desc, int expected, int received);
+static struct lval *lerr_args_too_many(struct lval *, const char *fname,
+				       int expected, int received);
+static struct lval *lerr_args_too_few(struct lval *, const char *fname,
+				      int expected, int received);
+static struct lval *lerr_args_type(struct lval *, const char *fname,
+				   int expected, int received);
+static struct lval *lerr_arg_error(struct lval *a, const char *fname,
+				   char *msg);
 
 /* current min size is int + 4 pointers (function lval)
  * which gives us a size of 4 + 8(4) = 36 Bytes on 64b
@@ -414,6 +441,11 @@ static char *fmt(const char *fmt, ...)
 	return buf;
 }
 
+/* returns a str representation of an lval for internal usage
+ *
+ * @param v: lval to convert
+ * @return: char * representation of lval
+ */
 static char *lval_to_str(struct lval *v)
 {
 	switch (v->type) {
@@ -754,6 +786,24 @@ static void lenv_add_builtins(struct lenv *e)
 	lenv_add_builtin(e, "-", builtin_sub);
 	lenv_add_builtin(e, "*", builtin_mul);
 	lenv_add_builtin(e, "/", builtin_div);
+
+	/* conditional */
+	lenv_add_builtin(e, "if", builtin_if);
+
+	/* equality */
+	lenv_add_builtin(e, "==", builtin_eq);
+	lenv_add_builtin(e, "!=", builtin_ne);
+
+	/* order */
+	lenv_add_builtin(e, "<=", builtin_le);
+	lenv_add_builtin(e, "<", builtin_lt);
+	lenv_add_builtin(e, ">", builtin_gt);
+	lenv_add_builtin(e, ">=", builtin_ge);
+
+	/* logical */
+	lenv_add_builtin(e, "&&", builtin_and);
+	lenv_add_builtin(e, "||", builtin_or);
+	lenv_add_builtin(e, "!", builtin_not);
 }
 
 static struct lval *builtin_op(struct lenv *e, struct lval *a, char *fname,
@@ -778,6 +828,7 @@ static struct lval *builtin_op(struct lenv *e, struct lval *a, char *fname,
 		x->num = -x->num;
 	}
 
+	/* TODO: obvious algorithmic performance opportunities here */
 	while (a->count > 0) {
 		struct lval *y = lval_pop(a, 0);
 
@@ -833,42 +884,188 @@ static struct lval *builtin_put(struct lenv *e, struct lval *a)
 	return builtin_var(e, a, "=");
 }
 
-struct lval *lerr_num(struct lval *a, const char *fname, char *desc,
-		      int expected, int received)
+static struct lval *builtin_eq(struct lenv *e, struct lval *a)
 {
-	return lval_func_err(a, fname, "%s. Got %d, expected %d", desc,
-			     received, expected);
+	if (a->count != 2)
+		return lerr_args_num(a, "==", "incorrect number of", 2,
+				     a->count);
+	int ret = lval_eq(a->cell[0], a->cell[1]);
+	lval_free(a);
+	return lval_num(ret);
 }
 
-struct lval *lerr_args_num(struct lval *a, const char *fname, char *desc,
-			   int expected, int received)
+static struct lval *builtin_ne(struct lenv *e, struct lval *a)
+{
+	if (a->count != 2)
+		return lerr_args_num(a, "!=", "incorrect number of", 2,
+				     a->count);
+	int ret = !lval_eq(a->cell[0], a->cell[1]);
+	lval_free(a);
+	return lval_num(ret);
+}
+
+static struct lval *builtin_gt(struct lenv *e, struct lval *a)
+{
+	return builtin_order(e, a, ">");
+}
+
+static struct lval *builtin_ge(struct lenv *e, struct lval *a)
+{
+	return builtin_order(e, a, ">=");
+}
+
+static struct lval *builtin_lt(struct lenv *e, struct lval *a)
+{
+	return builtin_order(e, a, "<");
+}
+
+static struct lval *builtin_le(struct lenv *e, struct lval *a)
+{
+	return builtin_order(e, a, "<=");
+}
+
+static struct lval *builtin_order(struct lenv *e, struct lval *a, char *op)
+{
+	if (a->count != 2)
+		return lerr_args_num(a, op, "incorrect number of", 2, a->count);
+	if (a->cell[0]->type != LVAL_NUM)
+		return lerr_args_type(a, op, LVAL_NUM, a->type);
+	if (a->cell[1]->type != LVAL_NUM)
+		return lerr_args_type(a, op, LVAL_NUM, a->type);
+	int num1 = a->cell[0]->num;
+	int num2 = a->cell[1]->num;
+	int ret;
+	if (strcmp(">", op) == 0) {
+		ret = (num1 > num2);
+	} else if (strcmp(">=", op) == 0) {
+		ret = (num1 >= num2);
+	} else if (strcmp("<", op) == 0) {
+		ret = (num1 < num2);
+	} else if (strcmp("<=", op) == 0) {
+		ret = (num1 <= num2);
+	} else {
+		return lerr_arg_error(
+			a, op,
+			"comparison op is not a member of set(>, >=, <, <=)");
+	}
+	lval_free(a);
+	return lval_num(ret);
+}
+
+static struct lval *builtin_logical(struct lenv *e, struct lval *a, char *op)
+{
+	int i;
+	for (i = 0; i < a->count; i++) {
+		if (a->cell[i]->type != LVAL_NUM) {
+			struct lval *out = lval_func_err(
+				a, op, "Cannot operate on non-number. Type %s",
+				ltype_name(a->cell[i]->type));
+			lval_free(a);
+			return out;
+		}
+	}
+
+	struct lval *x = lval_pop(a, 0);
+
+	/* not */
+	if ((strcmp(op, "!") == 0) && a->count == 0) {
+		x->num = !x->num;
+	}
+
+	/* TODO: obvious algorithmic performance opportunities here */
+	while (a->count > 0) {
+		struct lval *y = lval_pop(a, 0);
+
+		if (strcmp(op, "&&") == 0)
+			x->num &= y->num;
+		if (strcmp(op, "||") == 0)
+			x->num |= y->num;
+		lval_free(y);
+	}
+	lval_free(a);
+	return x;
+}
+
+static struct lval *builtin_or(struct lenv *e, struct lval *a)
+{
+	return builtin_logical(e, a, "||");
+}
+static struct lval *builtin_and(struct lenv *e, struct lval *a)
+{
+	return builtin_logical(e, a, "&&");
+}
+static struct lval *builtin_not(struct lenv *e, struct lval *a)
+{
+	return builtin_logical(e, a, "!");
+}
+
+static int lval_eq(struct lval *x, struct lval *y)
+{
+	int i;
+	if (x->type != y->type)
+		return 0;
+	switch (x->type) {
+	case LVAL_FUN:
+		if (x->builtin || y->builtin)
+			return x->builtin == y->builtin;
+		else {
+			return lval_eq(x->formals, y->formals) &&
+			       lval_eq(x->body, y->body);
+		}
+	case LVAL_NUM:
+		return x->num == y->num;
+	case LVAL_ERR:
+		return strcmp(x->err, y->err) == 0;
+	case LVAL_SYM:
+		return strcmp(x->sym, y->sym) == 0;
+	case LVAL_SEXPR: /* fallthrough */
+	case LVAL_QEXPR:
+		if (x->count != y->count)
+			return 0;
+		for (i = 0; i < x->count; i++) {
+			if (!lval_eq(x->cell[i], y->cell[i]))
+				return 0;
+		}
+		return 1;
+	default:
+		return 0;
+	}
+}
+
+static struct lval *lerr_args_num(struct lval *a, const char *fname, char *desc,
+				  int expected, int received)
 {
 	return lval_func_err(a, fname,
 			     "passed %s arguments. Got %d, expected %d", desc,
 			     received, expected);
 }
 
-struct lval *lerr_args_too_many(struct lval *a, const char *fname, int expected,
-				int received)
+static struct lval *lerr_args_too_many(struct lval *a, const char *fname,
+				       int expected, int received)
 {
 	return lerr_args_num(a, fname, "too many", expected, received);
 }
 
-struct lval *lerr_args_too_few(struct lval *a, const char *fname, int expected,
-			       int received)
+static struct lval *lerr_args_too_few(struct lval *a, const char *fname,
+				      int expected, int received)
 {
 	return lerr_args_num(a, fname, "too few", expected, received);
 }
-struct lval *lerr_args_type(struct lval *a, const char *fname, int expected,
-			    int received)
+
+static struct lval *lerr_args_type(struct lval *a, const char *fname,
+				   int expected, int received)
 {
 	return lval_func_err(a, fname,
 			     "passed incorrect type. Got %s, expected %s",
 			     ltype_name(received), ltype_name(expected));
 }
+static struct lval *lerr_arg_error(struct lval *a, const char *fname, char *msg)
+{
+	return lval_func_err(a, fname, msg);
+}
 
 /* builtin q-expr funcs */
-struct lval *builtin_head(struct lenv *e, struct lval *a)
+static struct lval *builtin_head(struct lenv *e, struct lval *a)
 {
 	const char fname[] = "head";
 	if (a->count != 1)
@@ -884,7 +1081,7 @@ struct lval *builtin_head(struct lenv *e, struct lval *a)
 	return v;
 }
 
-struct lval *builtin_tail(struct lenv *e, struct lval *a)
+static struct lval *builtin_tail(struct lenv *e, struct lval *a)
 {
 	const char fname[] = "tail";
 	if (a->count != 1)
@@ -899,13 +1096,13 @@ struct lval *builtin_tail(struct lenv *e, struct lval *a)
 	return v;
 }
 
-struct lval *builtin_list(struct lenv *e, struct lval *a)
+static struct lval *builtin_list(struct lenv *e, struct lval *a)
 {
 	a->type = LVAL_QEXPR;
 	return a;
 }
 
-struct lval *builtin_eval(struct lenv *e, struct lval *a)
+static struct lval *builtin_eval(struct lenv *e, struct lval *a)
 {
 	const char fname[] = "eval";
 	if (a->count != 1)
@@ -916,6 +1113,37 @@ struct lval *builtin_eval(struct lenv *e, struct lval *a)
 	struct lval *x = lval_take(a, 0);
 	x->type = LVAL_SEXPR;
 	return lval_eval(e, x);
+}
+
+/* (if condition {execute if cond true} {execute if cond false})
+ *
+ */
+static struct lval *builtin_if(struct lenv *e, struct lval *a)
+{
+	const char fname[] = "eval";
+	if (a->count > 3)
+		return lerr_args_too_many(a, fname, a->count, 3);
+	if (a->count < 3)
+		return lerr_args_too_few(a, fname, a->count, 3);
+	if (a->cell[0]->type != LVAL_NUM)
+		return lerr_args_type(a, fname, a->cell[0]->type, LVAL_NUM);
+	if (a->cell[1]->type != LVAL_QEXPR)
+		return lerr_args_type(a, fname, a->cell[1]->type, LVAL_QEXPR);
+	if (a->cell[2]->type != LVAL_QEXPR)
+		return lerr_args_type(a, fname, a->cell[2]->type, LVAL_QEXPR);
+
+	struct lval *x;
+	a->cell[1]->type = LVAL_SEXPR;
+	a->cell[2]->type = LVAL_SEXPR;
+
+	/* conditionally execute the first or second qexpr*/
+	if (a->cell[0]->num)
+		x = lval_eval(e, lval_pop(a, 1));
+	else
+		x = lval_eval(e, lval_pop(a, 2));
+
+	lval_free(a);
+	return x;
 }
 
 struct lval *builtin_join(struct lenv *e, struct lval *a)
@@ -1058,7 +1286,7 @@ int main(int argc, char *argv[])
 	mpca_lang(MPCA_LANG_DEFAULT,
 		  "                                                   \
 		number   : /-?[0-9]+/ ;                             \
-		symbol   : /[a-zA-Z0-9_+\\-*\\/\\\\=<>!&]+/ ;       \
+		symbol   : /[a-zA-Z0-9_+\\-*\\/\\\\=<>!&|]+/ ;       \
 		sexpr     : '(' <expr>* ')' ;                       \
 		qexpr     : '{' <expr>* '}' ;                       \
 		expr     : <number> | <symbol> | <sexpr> | <qexpr>; \
