@@ -77,6 +77,7 @@ static struct lval *builtin_add(struct lenv *, struct lval *);
 static struct lval *builtin_sub(struct lenv *, struct lval *);
 static struct lval *builtin_mul(struct lenv *, struct lval *);
 static struct lval *builtin_div(struct lenv *, struct lval *);
+static struct lval *builtin_mod(struct lenv *, struct lval *);
 
 static struct lval *builtin_def(struct lenv *, struct lval *);
 static struct lval *builtin_var(struct lenv *, struct lval *, char *);
@@ -96,6 +97,13 @@ static struct lval *builtin_if(struct lenv *e, struct lval *a);
 static struct lval *builtin_or(struct lenv *e, struct lval *a);
 static struct lval *builtin_and(struct lenv *e, struct lval *a);
 static struct lval *builtin_not(struct lenv *e, struct lval *a);
+
+static struct lval *builtin_bitwise_and(struct lenv *e, struct lval *a);
+static struct lval *builtin_bitwise_or(struct lenv *e, struct lval *a);
+static struct lval *builtin_bitwise_not(struct lenv *e, struct lval *a);
+static struct lval *builtin_bitwise_left_shift(struct lenv *e, struct lval *a);
+static struct lval *builtin_bitwise_right_shift(struct lenv *e, struct lval *a);
+static struct lval *builtin_bitwise_xor(struct lenv *e, struct lval *a);
 
 static int lval_eq(struct lval *, struct lval *);
 static void lval_free(struct lval *);
@@ -319,7 +327,7 @@ static void lval_free(struct lval *v)
 static struct lval *lval_read_num(mpc_ast_t *t)
 {
 	errno = 0;
-	long x = strtol(t->contents, NULL, 10);
+	long x = strtol(t->contents, NULL, 0);
 	return errno != ERANGE ? lval_num(x) : lval_err("invalid number");
 }
 
@@ -786,6 +794,7 @@ static void lenv_add_builtins(struct lenv *e)
 	lenv_add_builtin(e, "-", builtin_sub);
 	lenv_add_builtin(e, "*", builtin_mul);
 	lenv_add_builtin(e, "/", builtin_div);
+	lenv_add_builtin(e, "%", builtin_mod);
 
 	/* conditional */
 	lenv_add_builtin(e, "if", builtin_if);
@@ -804,6 +813,14 @@ static void lenv_add_builtins(struct lenv *e)
 	lenv_add_builtin(e, "&&", builtin_and);
 	lenv_add_builtin(e, "||", builtin_or);
 	lenv_add_builtin(e, "!", builtin_not);
+
+	/* bitwise */
+	lenv_add_builtin(e, "~", builtin_bitwise_not);
+	lenv_add_builtin(e, "|", builtin_bitwise_or);
+	lenv_add_builtin(e, "&", builtin_bitwise_and);
+	lenv_add_builtin(e, "^", builtin_bitwise_xor);
+	lenv_add_builtin(e, ">>", builtin_bitwise_right_shift);
+	lenv_add_builtin(e, "<<", builtin_bitwise_left_shift);
 }
 
 static struct lval *builtin_op(struct lenv *e, struct lval *a, char *fname,
@@ -847,6 +864,15 @@ static struct lval *builtin_op(struct lenv *e, struct lval *a, char *fname,
 			}
 			x->num /= y->num;
 		}
+		if (strcmp(op, "%") == 0) {
+			if (y->num == 0) {
+				lval_free(x);
+				lval_free(y);
+				x = lval_err("Modulo By Zero!");
+				break;
+			}
+			x->num %= y->num;
+		}
 		lval_free(y);
 	}
 	lval_free(a);
@@ -872,6 +898,11 @@ static struct lval *builtin_mul(struct lenv *e, struct lval *a)
 static struct lval *builtin_div(struct lenv *e, struct lval *a)
 {
 	return builtin_op(e, a, "div", "/");
+}
+
+static struct lval *builtin_mod(struct lenv *e, struct lval *a)
+{
+	return builtin_op(e, a, "mod", "%");
 }
 
 static struct lval *builtin_def(struct lenv *e, struct lval *a)
@@ -968,8 +999,15 @@ static struct lval *builtin_logical(struct lenv *e, struct lval *a, char *op)
 	struct lval *x = lval_pop(a, 0);
 
 	/* not */
-	if ((strcmp(op, "!") == 0) && a->count == 0) {
-		x->num = !x->num;
+	if (strcmp(op, "!") == 0) {
+		if (a->count == 0) {
+			x->num = !x->num;
+		} else {
+			struct lval *err =
+				lerr_args_too_many(a, op, 1, a->count + 1);
+			lval_free(a);
+			return err;
+		}
 	}
 
 	/* TODO: obvious algorithmic performance opportunities here */
@@ -977,13 +1015,79 @@ static struct lval *builtin_logical(struct lenv *e, struct lval *a, char *op)
 		struct lval *y = lval_pop(a, 0);
 
 		if (strcmp(op, "&&") == 0)
-			x->num &= y->num;
+			x->num = x->num && y->num;
 		if (strcmp(op, "||") == 0)
-			x->num |= y->num;
+			x->num = x->num || y->num;
 		lval_free(y);
 	}
 	lval_free(a);
 	return x;
+}
+
+static struct lval *builtin_bitwise(struct lenv *e, struct lval *a, char *op)
+{
+	int i;
+	for (i = 0; i < a->count; i++) {
+		if (a->cell[i]->type != LVAL_NUM) {
+			struct lval *out = lval_func_err(
+				a, op, "Cannot operate on non-number. Type %s",
+				ltype_name(a->cell[i]->type));
+			lval_free(a);
+			return out;
+		}
+	}
+
+	struct lval *x = lval_pop(a, 0);
+
+	/* one's complement negation */
+	if ((strcmp(op, "~") == 0)) {
+		if (a->count == 0) {
+			x->num = ~x->num;
+		} else {
+			struct lval *err =
+				lerr_args_too_many(a, op, 1, a->count + 1);
+			lval_free(a);
+			return err;
+		}
+	}
+
+	/* TODO: obvious algorithmic performance opportunities here */
+	while (a->count > 0) {
+		struct lval *y = lval_pop(a, 0);
+
+		if (strcmp(op, "&") == 0)
+			x->num = x->num & y->num;
+		if (strcmp(op, "|") == 0)
+			x->num = x->num | y->num;
+		lval_free(y);
+	}
+	lval_free(a);
+	return x;
+}
+
+static struct lval *builtin_bitwise_and(struct lenv *e, struct lval *a)
+{
+	return builtin_bitwise(e, a, "&");
+}
+static struct lval *builtin_bitwise_or(struct lenv *e, struct lval *a)
+{
+	return builtin_bitwise(e, a, "|");
+}
+static struct lval *builtin_bitwise_not(struct lenv *e, struct lval *a)
+{
+	return builtin_bitwise(e, a, "~");
+}
+static struct lval *builtin_bitwise_left_shift(struct lenv *e, struct lval *a)
+{
+	return builtin_bitwise(e, a, "<<");
+}
+static struct lval *builtin_bitwise_right_shift(struct lenv *e, struct lval *a)
+{
+	return builtin_bitwise(e, a, ">>");
+}
+static struct lval *builtin_bitwise_xor(struct lenv *e, struct lval *a)
+{
+	return builtin_bitwise(e, a, "^");
 }
 
 static struct lval *builtin_or(struct lenv *e, struct lval *a)
@@ -1284,9 +1388,9 @@ int main(int argc, char *argv[])
 
 	/* Define them with the following Language */
 	mpca_lang(MPCA_LANG_DEFAULT,
-		  "                                                   \
+		  "                                                 \
 		number   : /-?[0-9]+/ ;                             \
-		symbol   : /[a-zA-Z0-9_+\\-*\\/\\\\=<>!&|]+/ ;       \
+		symbol   : /[a-zA-Z0-9_+\\-*\\/\\\\=<>!&%^~|]+/ ;   \
 		sexpr     : '(' <expr>* ')' ;                       \
 		qexpr     : '{' <expr>* '}' ;                       \
 		expr     : <number> | <symbol> | <sexpr> | <qexpr>; \
