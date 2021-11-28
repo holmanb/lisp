@@ -56,9 +56,11 @@ mpc_parser_t *Expr;
 mpc_parser_t *Lisp;
 
 typedef struct lval *(*lbuiltin)(struct lenv *, struct lval *);
-static void lval_expr_print(struct lenv *, struct lval *, char open, char close);
+static void lval_expr_print(struct lenv *, struct lval *, char open,
+			    char close);
 static char *lval_to_str(struct lenv *, struct lval *);
-static char *lval_expr_to_str(struct lenv *, struct lval *, char open, char close);
+static char *lval_expr_to_str(struct lenv *, struct lval *, char open,
+			      char close);
 
 char *String(char *s, ...);
 char *ltype_name(int t);
@@ -132,9 +134,10 @@ static struct lenv *lenv_copy(struct lenv *e);
 static void lenv_put(struct lenv *e, struct lval *k, struct lval *v);
 static void lenv_free(struct lenv *e);
 
-static struct lval *lerr_args_num_desc(struct lval *a, const char *fname, char *desc,
+static struct lval *lerr_args_num_desc(struct lval *a, const char *fname,
+				       char *desc, int expected, int received);
+static struct lval *lerr_args_num(struct lval *lval, const char *fname,
 				  int expected, int received);
-static struct lval *lerr_args_num(struct lval *lval, const char *fname, int expected, int received);
 static struct lval *lerr_args_too_many(struct lval *, const char *fname,
 				       int expected, int received);
 static struct lval *lerr_args_too_few(struct lval *, const char *fname,
@@ -426,7 +429,8 @@ static struct lval *lval_read(mpc_ast_t *t)
 }
 
 /* same as lval_expr_print, but return a char * with the contents */
-static char *lval_expr_to_str(struct lenv *e, struct lval *v, char open, char close)
+static char *lval_expr_to_str(struct lenv *e, struct lval *v, char open,
+			      char close)
 {
 	int i;
 	char *new_buf, *old_buf;
@@ -452,7 +456,8 @@ static char *lval_expr_to_str(struct lenv *e, struct lval *v, char open, char cl
 	return String("%c%s%c", open, new_buf, close);
 }
 
-static void lval_expr_print(struct lenv *e, struct lval *v, char open, char close)
+static void lval_expr_print(struct lenv *e, struct lval *v, char open,
+			    char close)
 {
 	int i;
 	putchar(open);
@@ -499,7 +504,7 @@ static char *fmt(const char *fmt, ...)
 	return buf;
 }
 
-static char * lval_str_to_str(struct lval *v)
+static char *lval_str_to_str(struct lval *v)
 {
 	char *escaped = xmalloc(strlen(v->str) + 1);
 	strcpy(escaped, v->str);
@@ -536,11 +541,13 @@ static char *lval_to_str(struct lenv *e, struct lval *v)
 		return lval_expr_to_str(e, v, '{', '}');
 	case LVAL_FUN:
 		if (v->builtin)
-			return String("<builtin function '%s'>", lenv_lookup_sym_by_val(e, v));
+			return String("<builtin function '%s'>",
+				      lenv_lookup_sym_by_val(e, v));
 		else {
 			char *formals = lval_to_str(e, v->formals);
 			char *body = lval_to_str(e, v->body);
-			char *out = String("%s %s %s)", lenv_lookup_sym_by_val, formals, body);
+			char *out = String("%s %s %s)", lenv_lookup_sym_by_val,
+					   formals, body);
 			free(formals);
 			free(body);
 			return out;
@@ -573,7 +580,8 @@ static void lval_print(struct lenv *e, struct lval *v)
 		break;
 	case LVAL_FUN:
 		if (v->builtin)
-			printf("<builtin function '%s'>", lenv_lookup_sym_by_val(e, v));
+			printf("<builtin function '%s'>",
+			       lenv_lookup_sym_by_val(e, v));
 		else {
 			printf("%s", lenv_lookup_sym_by_val(e, v));
 			lval_print(e, v->formals);
@@ -976,8 +984,7 @@ static struct lval *builtin_op(struct lenv *e, struct lval *a, char *fname,
 static struct lval *builtin_assert(struct lenv *e, struct lval *a)
 {
 	if (a->count != 2)
-		return lerr_args_num(a, "assert", 2,
-				     a->count);
+		return lerr_args_num(a, "assert", 2, a->count);
 
 	struct lval *r1 = lval_eval(e, a->cell[0]);
 	struct lval *r2 = lval_eval(e, a->cell[1]);
@@ -1031,16 +1038,15 @@ static struct lval *lenv_load(struct lenv *e, char *file)
 		free(err_msg);
 		return err;
 	}
-
 }
 
 static struct lval *builtin_load(struct lenv *e, struct lval *a)
 {
 	char fname[] = "load";
-	if (a->count != 1){
+	if (a->count != 1) {
 		return lerr_args_num(a, fname, 1, a->count);
 	}
-	if (a->cell[0]->type != LVAL_STR){
+	if (a->cell[0]->type != LVAL_STR) {
 		return lerr_args_type(a, fname, LVAL_STR, a->type);
 	}
 	return lenv_load(e, a->cell[0]->str);
@@ -1328,8 +1334,8 @@ static struct lval *lerr_args_num(struct lval *a, const char *fname,
 		return lerr_args_too_few(a, fname, expected, received);
 }
 
-static struct lval *lerr_args_num_desc(struct lval *a, const char *fname, char *desc,
-				  int expected, int received)
+static struct lval *lerr_args_num_desc(struct lval *a, const char *fname,
+				       char *desc, int expected, int received)
 {
 	return lval_func_err(a, fname,
 			     "passed %s arguments. Got %d, expected %d", desc,
@@ -1566,8 +1572,8 @@ char *ltype_name(int t)
 
 int main(int argc, char *argv[])
 {
+	int i;
 	puts(version);
-	puts("Press Ctrl+c to Exit\n");
 
 	/* Create Some Parsers */
 	Number = mpc_new("number");
@@ -1583,33 +1589,53 @@ int main(int argc, char *argv[])
 	mpca_lang(MPCA_LANG_DEFAULT,
 		  "                                                 \
 		number   : /-?[0-9]+/ ;                             \
-		charbuf : /\"(\\\\.|[^\"])*\"/ ;                    \
+		charbuf  : /\"(\\\\.|[^\"])*\"/ ;                   \
 		comment  : /;[^\\r\\n]*/ ;                          \
 		symbol   : /[a-zA-Z0-9_+\\-*\\/\\\\=<>!&%^~|]+/ ;   \
 		sexpr    : '(' <expr>* ')' ;                        \
 		qexpr    : '{' <expr>* '}' ;                        \
 		expr     : <number> | <symbol> | <charbuf> |        \
-		           <comment> | <sexpr> | <qexpr>;           \
+		           <comment> | <sexpr> |                    \
+			   <qexpr>;                                 \
 		lisp    : /^/ <expr>* /$/ ;                         \
 		",
 		  Number, Charbuf, Comment, Symbol, Sexpr, Qexpr, Expr, Lisp);
-	struct lenv *env = lenv_new();
-	lenv_add_builtins(env);
-	while (1) {
-		mpc_result_t r;
-		char *input = readline("lisp> ");
-		add_history(input);
-		if (mpc_parse("<stdin>", input, Lisp, &r)) {
-			struct lval *x = lval_eval(env, lval_read(r.output));
-			lval_println(env, x);
-			mpc_ast_delete(r.output);
+	struct lenv *e = lenv_new();
+	lenv_add_builtins(e);
+
+	if (argc >= 2) {
+		/* execute supplied filenames */
+		for (i = 1; i < argc; i++) {
+			struct lval *args =
+				lval_add(lval_sexpr(), lval_str(argv[i]));
+			struct lval *x = builtin_load(e, args);
+
+			if (x->type == LVAL_ERR)
+				lval_println(e, x);
 			lval_free(x);
-		} else {
-			mpc_err_print(r.error);
-			mpc_err_delete(r.error);
+		}
+
+	} else {
+		/* repl loop */
+		puts("Press Ctrl+c to Exit\n");
+		while (1) {
+			mpc_result_t r;
+			char *input = readline("lisp> ");
+			add_history(input);
+			if (mpc_parse("<stdin>", input, Lisp, &r)) {
+				struct lval *x =
+					lval_eval(e, lval_read(r.output));
+				lval_println(e, x);
+				mpc_ast_delete(r.output);
+				lval_free(x);
+			} else {
+				mpc_err_print(r.error);
+				mpc_err_delete(r.error);
+			}
 		}
 	}
-	lenv_free(env);
-	mpc_cleanup(8, Number, Symbol, Charbuf, Comment, Sexpr, Qexpr, Expr, Lisp);
+	lenv_free(e);
+	mpc_cleanup(8, Number, Symbol, Charbuf, Comment, Sexpr, Qexpr, Expr,
+		    Lisp);
 	return 0;
 }
