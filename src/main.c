@@ -65,6 +65,8 @@ static struct lval *lval_pop(struct lval *, int i);
 static struct lval *lval_call(struct lenv *, struct lval *, struct lval *);
 static struct lval *lval_err(const char *fmt, ...);
 
+static struct lval *builtin_assert(struct lenv *, struct lval *);
+
 static struct lval *builtin_op(struct lenv *, struct lval *, char *, char *);
 static struct lval *builtin_eval(struct lenv *, struct lval *);
 
@@ -383,7 +385,7 @@ static char *lval_expr_to_str(struct lval *v, char open, char close)
 	if (v->count == 0)
 		return String("%c%c", open, close);
 
-	/* initialize empty buffer for first concat*/
+	/* initialize empty buffer for first concat */
 	old_buf = xmalloc(1);
 	old_buf[0] = '\0';
 
@@ -821,6 +823,9 @@ static void lenv_add_builtins(struct lenv *e)
 	lenv_add_builtin(e, "^", builtin_bitwise_xor);
 	lenv_add_builtin(e, ">>", builtin_bitwise_right_shift);
 	lenv_add_builtin(e, "<<", builtin_bitwise_left_shift);
+
+	/* testing */
+	lenv_add_builtin(e, "assert", builtin_assert);
 }
 
 static struct lval *builtin_op(struct lenv *e, struct lval *a, char *fname,
@@ -877,6 +882,32 @@ static struct lval *builtin_op(struct lenv *e, struct lval *a, char *fname,
 	}
 	lval_free(a);
 	return x;
+}
+
+/* Evaluate and compare both arguments for equality.
+ * @param e: env
+ * @param a: lval containing two args for comparison
+ */
+static struct lval *builtin_assert(struct lenv *e, struct lval *a)
+{
+	if (a->count != 2)
+		return lerr_args_num(a, "assert", "incorrect number of", 2,
+				     a->count);
+
+	struct lval *r1 = lval_eval(e, a->cell[0]);
+	struct lval *r2 = lval_eval(e, a->cell[1]);
+	if (lval_eq(r1, r2)) {
+		free(a);
+		return lval_num(1);
+	} else {
+		char *expr1 = lval_to_str(a->cell[0]);
+		char *expr2 = lval_to_str(a->cell[1]);
+		struct lval *out =
+			lval_err("assert failed [%s] != [%s]", expr1, expr2);
+
+		free(a);
+		return out;
+	}
 }
 
 /* builtin math ops */
