@@ -79,6 +79,8 @@ static struct lval *lval_call(struct lenv *, struct lval *, struct lval *);
 static struct lval *lval_str(char *s);
 static struct lval *lval_err(const char *fmt, ...);
 
+static struct lval *builtin_print(struct lenv *e, struct lval *a);
+static struct lval *builtin_error(struct lenv *e, struct lval *a);
 static struct lval *builtin_assert(struct lenv *, struct lval *);
 
 static struct lval *builtin_load(struct lenv *, struct lval *);
@@ -143,6 +145,8 @@ static struct lval *lerr_args_too_many(struct lval *, const char *fname,
 static struct lval *lerr_args_too_few(struct lval *, const char *fname,
 				      int expected, int received);
 static struct lval *lerr_args_type(struct lval *, const char *fname,
+				   int expected, int received);
+static struct lval *lerr_args_mult_type(struct lval *, const char *fname,
 				   int expected, int received);
 static struct lval *lerr_arg_error(struct lval *a, const char *fname,
 				   char *msg);
@@ -640,12 +644,30 @@ struct lval *lval_eval_sexpr(struct lenv *e, struct lval *v)
 	return result;
 }
 
-struct lval *lval_join(struct lval *x, struct lval *y)
+struct lval *lval_join_qexpr(struct lval *x, struct lval *y)
 {
 	while (y->count)
 		x = lval_add(x, lval_pop(y, 0));
-	lval_free(y);
+	free(y);
 	return x;
+}
+
+struct lval *lval_join_charbuf(struct lenv *e, struct lval *a)
+{
+	int space = 0;
+	int i;
+	for (i = 0; i < a->count; i++) {
+		space += strlen(a->cell[i]->str);
+	}
+	char *buf = xmalloc(space + 1);
+	buf[0] = '\0';
+	for (i = 0; i < a->count; i++) {
+		strcat(buf, a->cell[i]->str);
+	}
+	struct lval *out = lval_str(buf);
+	free(buf);
+	free(a);
+	return out;
 }
 
 struct lval *lval_eval(struct lenv *e, struct lval *v)
@@ -873,6 +895,8 @@ static void lenv_add_builtins(struct lenv *e)
 {
 	lenv_add_builtin(e, "load", builtin_load);
 	lenv_add_builtin(e, "type", builtin_type);
+	lenv_add_builtin(e, "error", builtin_error);
+	lenv_add_builtin(e, "print", builtin_print);
 
 	/* list functions */
 	lenv_add_builtin(e, "list", builtin_list);
@@ -919,6 +943,71 @@ static void lenv_add_builtins(struct lenv *e)
 
 	/* testing */
 	lenv_add_builtin(e, "assert", builtin_assert);
+}
+
+static struct lval *lenv_load(struct lenv *e, char *file)
+{
+	/* parse file of string name */
+	mpc_result_t r;
+	if (mpc_parse_contents(file, Lisp, &r)) {
+		struct lval *expr = lval_read(r.output);
+		int i = 1;
+		mpc_ast_delete(r.output);
+		while (expr->count) {
+			struct lval *x = lval_eval(e, lval_pop(expr, 0));
+			if (x->type == LVAL_ERR) {
+				printf("\nLoad error in %s:%d\b", file, i);
+				lval_println(e, x);
+			}
+			lval_free(x);
+			i++;
+		}
+		lval_free(expr);
+		return lval_sexpr();
+	} else {
+		/* get parser error as string */
+		char *err_msg = mpc_err_string(r.error);
+		mpc_err_delete(r.error);
+
+		struct lval *err = lval_err("Could not load %s", err_msg);
+		free(err_msg);
+		return err;
+	}
+}
+
+static char *lenv_lookup_sym_by_val(struct lenv *e, struct lval *a)
+{
+	int i = lenv_get_val_pos(e, a);
+	if (i != -1)
+		return e->syms[i];
+	else if (e->par)
+		return lenv_lookup_sym_by_val(e->par, a);
+	return "\\";
+}
+
+static struct lval *builtin_print(struct lenv *e, struct lval *a)
+{
+	int i;
+	for (i = 0; i < a->count; i++) {
+		lval_print(e, a->cell[i]);
+		putchar(' ');
+	}
+	putchar('\n');
+	lval_free(a);
+	return lval_sexpr();
+}
+
+static struct lval *builtin_error(struct lenv *e, struct lval *a)
+{
+	char fname[] = "error";
+	if (a->count != 1)
+		return lerr_args_num(a, fname, 1, a->count);
+	if (a->cell[0]->type!= LVAL_STR)
+		return lerr_args_type(a, fname, LVAL_STR, a->cell[0]->type);
+
+	struct lval *err = lval_err(a->cell[0]->str);
+	lval_free(a);
+	return err;
 }
 
 static struct lval *builtin_op(struct lenv *e, struct lval *a, char *fname,
@@ -1008,36 +1097,6 @@ static struct lval *builtin_type(struct lenv *e, struct lval *a)
 	if (a->count != 1)
 		return lerr_args_num(a, fname, 1, a->count);
 	return lval_str(ltype_name(a->cell[0]->type));
-}
-
-static struct lval *lenv_load(struct lenv *e, char *file)
-{
-	/* parse file of string name */
-	mpc_result_t r;
-	if (mpc_parse_contents(file, Lisp, &r)) {
-		struct lval *expr = lval_read(r.output);
-		int i = 1;
-		mpc_ast_delete(r.output);
-		while (expr->count) {
-			struct lval *x = lval_eval(e, lval_pop(expr, 0));
-			if (x->type == LVAL_ERR) {
-				printf("\nLoad error in %s:%d\b", file, i);
-				lval_println(e, x);
-			}
-			lval_free(x);
-			i++;
-		}
-		lval_free(expr);
-		return lval_sexpr();
-	} else {
-		/* get parser error as string */
-		char *err_msg = mpc_err_string(r.error);
-		mpc_err_delete(r.error);
-
-		struct lval *err = lval_err("Could not load %s", err_msg);
-		free(err_msg);
-		return err;
-	}
 }
 
 static struct lval *builtin_load(struct lenv *e, struct lval *a)
@@ -1280,15 +1339,6 @@ static struct lval *builtin_not(struct lenv *e, struct lval *a)
 	return builtin_logical(e, a, "!");
 }
 
-static char *lenv_lookup_sym_by_val(struct lenv *e, struct lval *a)
-{
-	int i = lenv_get_val_pos(e, a);
-	if (i != -1)
-		return e->syms[i];
-	else if (e->par)
-		return lenv_lookup_sym_by_val(e->par, a);
-	return "\\";
-}
 
 static int lval_eq(struct lval *x, struct lval *y)
 {
@@ -1329,9 +1379,9 @@ static struct lval *lerr_args_num(struct lval *a, const char *fname,
 				  int expected, int received)
 {
 	if (expected > received)
-		return lerr_args_too_many(a, fname, expected, received);
-	else
 		return lerr_args_too_few(a, fname, expected, received);
+	else
+		return lerr_args_too_many(a, fname, expected, received);
 }
 
 static struct lval *lerr_args_num_desc(struct lval *a, const char *fname,
@@ -1361,6 +1411,15 @@ static struct lval *lerr_args_type(struct lval *a, const char *fname,
 			     "passed incorrect type. Got %s, expected %s",
 			     ltype_name(received), ltype_name(expected));
 }
+
+static struct lval *lerr_args_mult_type(struct lval *a, const char *fname,
+				   int type1, int type2)
+{
+	return lval_func_err(a, fname,
+			     "passed multiple types. Expected one type but receive %s and %s",
+			     ltype_name(type1), ltype_name(type2));
+}
+
 static struct lval *lerr_arg_error(struct lval *a, const char *fname, char *msg)
 {
 	return lval_func_err(a, fname, msg);
@@ -1452,17 +1511,31 @@ struct lval *builtin_join(struct lenv *e, struct lval *a)
 {
 	int i;
 	const char fname[] = "join";
+	int last_type = a->cell[0]->type;
 	for (i = 0; i < a->count; i++) {
-		if (a->cell[i]->type != LVAL_QEXPR)
-			return lerr_args_type(a, fname, a->cell[i]->type,
-					      LVAL_QEXPR);
+		if (a->cell[i]->type == LVAL_QEXPR) {
+			if (last_type != LVAL_QEXPR)
+				return lerr_args_mult_type(a, fname, last_type, LVAL_QEXPR);
+		} else if (a->cell[i]->type == LVAL_STR) {
+			if (last_type != LVAL_STR)
+				return lerr_args_mult_type(a, fname, last_type, LVAL_STR);
+		} else {
+			return lval_func_err(a, fname, "Function %s: expected argument types in set(%s, %s), received: %s", fname, ltype_name(LVAL_QEXPR), ltype_name(LVAL_QEXPR), ltype_name(a->cell[i]->type));
+		}
 	}
-	struct lval *x = lval_pop(a, 0);
 
-	while (a->count)
-		x = lval_join(x, lval_pop(a, 0));
+	struct lval *x;
+	if (a->cell[0]->type == LVAL_QEXPR) {
+		x = lval_pop(a, 0);
+		while (a->count)
+			x = lval_join_qexpr (x, lval_pop(a, 0));
+	}
+	else if (a->cell[0]->type == LVAL_STR) {
+		x = lval_join_charbuf(e, a);
+	} else {
+		return lval_func_err(a, fname, "Function %s: expected argument types in set(%s, %s), received: %s", fname, ltype_name(LVAL_QEXPR), ltype_name(LVAL_QEXPR), ltype_name(a->cell[0]->type));
+	}
 
-	lval_free(a);
 	return x;
 }
 
@@ -1595,8 +1668,7 @@ int main(int argc, char *argv[])
 		sexpr    : '(' <expr>* ')' ;                        \
 		qexpr    : '{' <expr>* '}' ;                        \
 		expr     : <number> | <symbol> | <charbuf> |        \
-		           <comment> | <sexpr> |                    \
-			   <qexpr>;                                 \
+		           <comment> | <sexpr> | <qexpr> ;          \
 		lisp    : /^/ <expr>* /$/ ;                         \
 		",
 		  Number, Charbuf, Comment, Symbol, Sexpr, Qexpr, Expr, Lisp);
@@ -1604,7 +1676,7 @@ int main(int argc, char *argv[])
 	lenv_add_builtins(e);
 
 	if (argc >= 2) {
-		/* execute supplied filenames */
+		/* execute file(s) */
 		for (i = 1; i < argc; i++) {
 			struct lval *args =
 				lval_add(lval_sexpr(), lval_str(argv[i]));
