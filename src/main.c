@@ -147,7 +147,7 @@ static struct lval *lerr_args_too_few(struct lval *, const char *fname,
 static struct lval *lerr_args_type(struct lval *, const char *fname,
 				   int expected, int received);
 static struct lval *lerr_args_mult_type(struct lval *, const char *fname,
-				   int expected, int received);
+					int expected, int received);
 static struct lval *lerr_arg_error(struct lval *a, const char *fname,
 				   char *msg);
 
@@ -1002,7 +1002,7 @@ static struct lval *builtin_error(struct lenv *e, struct lval *a)
 	char fname[] = "error";
 	if (a->count != 1)
 		return lerr_args_num(a, fname, 1, a->count);
-	if (a->cell[0]->type!= LVAL_STR)
+	if (a->cell[0]->type != LVAL_STR)
 		return lerr_args_type(a, fname, LVAL_STR, a->cell[0]->type);
 
 	struct lval *err = lval_err(a->cell[0]->str);
@@ -1339,7 +1339,6 @@ static struct lval *builtin_not(struct lenv *e, struct lval *a)
 	return builtin_logical(e, a, "!");
 }
 
-
 static int lval_eq(struct lval *x, struct lval *y)
 {
 	int i;
@@ -1413,11 +1412,12 @@ static struct lval *lerr_args_type(struct lval *a, const char *fname,
 }
 
 static struct lval *lerr_args_mult_type(struct lval *a, const char *fname,
-				   int type1, int type2)
+					int type1, int type2)
 {
-	return lval_func_err(a, fname,
-			     "passed multiple types. Expected one type but receive %s and %s",
-			     ltype_name(type1), ltype_name(type2));
+	return lval_func_err(
+		a, fname,
+		"passed multiple types. Expected one type but receive %s and %s",
+		ltype_name(type1), ltype_name(type2));
 }
 
 static struct lval *lerr_arg_error(struct lval *a, const char *fname, char *msg)
@@ -1515,12 +1515,19 @@ struct lval *builtin_join(struct lenv *e, struct lval *a)
 	for (i = 0; i < a->count; i++) {
 		if (a->cell[i]->type == LVAL_QEXPR) {
 			if (last_type != LVAL_QEXPR)
-				return lerr_args_mult_type(a, fname, last_type, LVAL_QEXPR);
+				return lerr_args_mult_type(a, fname, last_type,
+							   LVAL_QEXPR);
 		} else if (a->cell[i]->type == LVAL_STR) {
 			if (last_type != LVAL_STR)
-				return lerr_args_mult_type(a, fname, last_type, LVAL_STR);
+				return lerr_args_mult_type(a, fname, last_type,
+							   LVAL_STR);
 		} else {
-			return lval_func_err(a, fname, "Function %s: expected argument types in set(%s, %s), received: %s", fname, ltype_name(LVAL_QEXPR), ltype_name(LVAL_QEXPR), ltype_name(a->cell[i]->type));
+			return lval_func_err(
+				a, fname,
+				"Function %s: expected argument types in set(%s, %s), received: %s",
+				fname, ltype_name(LVAL_QEXPR),
+				ltype_name(LVAL_QEXPR),
+				ltype_name(a->cell[i]->type));
 		}
 	}
 
@@ -1528,12 +1535,15 @@ struct lval *builtin_join(struct lenv *e, struct lval *a)
 	if (a->cell[0]->type == LVAL_QEXPR) {
 		x = lval_pop(a, 0);
 		while (a->count)
-			x = lval_join_qexpr (x, lval_pop(a, 0));
-	}
-	else if (a->cell[0]->type == LVAL_STR) {
+			x = lval_join_qexpr(x, lval_pop(a, 0));
+	} else if (a->cell[0]->type == LVAL_STR) {
 		x = lval_join_charbuf(e, a);
 	} else {
-		return lval_func_err(a, fname, "Function %s: expected argument types in set(%s, %s), received: %s", fname, ltype_name(LVAL_QEXPR), ltype_name(LVAL_QEXPR), ltype_name(a->cell[0]->type));
+		return lval_func_err(
+			a, fname,
+			"Function %s: expected argument types in set(%s, %s), received: %s",
+			fname, ltype_name(LVAL_QEXPR), ltype_name(LVAL_QEXPR),
+			ltype_name(a->cell[0]->type));
 	}
 
 	return x;
