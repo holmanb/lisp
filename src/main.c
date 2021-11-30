@@ -31,7 +31,7 @@ enum {
 	LVAL_ERR,
 	LVAL_NUM,
 	LVAL_SYM,
-	LVAL_STR,
+	LVAL_CHARBUF,
 	LVAL_FUN,
 	LVAL_SEXPR,
 	LVAL_QEXPR,
@@ -162,7 +162,7 @@ struct lval {
 		/* basic */
 		union {
 			char *sym;
-			char *str;
+			char *charbuf;
 			char *err;
 			long num;
 		};
@@ -300,7 +300,7 @@ static struct lval *lval_read_str(mpc_ast_t *t)
 static struct lval *lval_str(char *s)
 {
 	struct lval *v = xmalloc(sizeof(struct lval));
-	v->type = LVAL_STR;
+	v->type = LVAL_CHARBUF;
 	v->sym = xmalloc(strlen(s) + 1);
 	strcpy(v->sym, s);
 	return v;
@@ -354,8 +354,8 @@ static void lval_free(struct lval *v)
 	case LVAL_SYM:
 		free(v->sym);
 		break;
-	case LVAL_STR:
-		free(v->str);
+	case LVAL_CHARBUF:
+		free(v->charbuf);
 		break;
 	case LVAL_SEXPR: /* fall through */
 	case LVAL_QEXPR:
@@ -509,8 +509,8 @@ static char *fmt(const char *fmt, ...)
 
 static char *lval_str_to_str(struct lval *v)
 {
-	char *escaped = xmalloc(strlen(v->str) + 1);
-	strcpy(escaped, v->str);
+	char *escaped = xmalloc(strlen(v->charbuf) + 1);
+	strcpy(escaped, v->charbuf);
 	escaped = mpcf_escape(escaped);
 	return escaped;
 }
@@ -538,7 +538,7 @@ static char *lval_to_str(struct lenv *e, struct lval *v)
 		return String("%s", v->sym);
 	case LVAL_SEXPR:
 		return lval_expr_to_str(e, v, '(', ')');
-	case LVAL_STR:
+	case LVAL_CHARBUF:
 		return lval_str_to_str(v);
 	case LVAL_QEXPR:
 		return lval_expr_to_str(e, v, '{', '}');
@@ -549,7 +549,8 @@ static char *lval_to_str(struct lenv *e, struct lval *v)
 		else {
 			char *formals = lval_to_str(e, v->formals);
 			char *body = lval_to_str(e, v->body);
-			char *out = String("%s %s %s)", lenv_lookup_sym_by_val(e, v),
+			char *out = String("%s %s %s)",
+					   lenv_lookup_sym_by_val(e, v),
 					   formals, body);
 			free(formals);
 			free(body);
@@ -572,7 +573,7 @@ static void lval_print(struct lenv *e, struct lval *v)
 	case LVAL_SYM:
 		printf("%s", v->sym);
 		break;
-	case LVAL_STR:
+	case LVAL_CHARBUF:
 		lval_print_str(v);
 		break;
 	case LVAL_SEXPR:
@@ -656,12 +657,12 @@ struct lval *lval_join_charbuf(struct lenv *e, struct lval *a)
 	int space = 0;
 	int i;
 	for (i = 0; i < a->count; i++) {
-		space += strlen(a->cell[i]->str);
+		space += strlen(a->cell[i]->charbuf);
 	}
 	char *buf = xmalloc(space + 1);
 	buf[0] = '\0';
 	for (i = 0; i < a->count; i++) {
-		strcat(buf, a->cell[i]->str);
+		strcat(buf, a->cell[i]->charbuf);
 	}
 	struct lval *out = lval_str(buf);
 	free(buf);
@@ -749,9 +750,9 @@ static struct lval *lval_copy(struct lval *v)
 		x->sym = xmalloc(strlen(v->sym) + 1);
 		strcpy(x->sym, v->sym);
 		break;
-	case LVAL_STR:
-		x->sym = xmalloc(strlen(v->str) + 1);
-		strcpy(x->str, v->str);
+	case LVAL_CHARBUF:
+		x->sym = xmalloc(strlen(v->charbuf) + 1);
+		strcpy(x->charbuf, v->charbuf);
 		break;
 
 	/* copy lists */
@@ -1001,10 +1002,10 @@ static struct lval *builtin_error(struct lenv *e, struct lval *a)
 	char fname[] = "error";
 	if (a->count != 1)
 		return lerr_args_num(a, fname, 1);
-	if (a->cell[0]->type != LVAL_STR)
-		return lerr_args_type(a, fname, LVAL_STR, a->cell[0]->type);
+	if (a->cell[0]->type != LVAL_CHARBUF)
+		return lerr_args_type(a, fname, LVAL_CHARBUF, a->cell[0]->type);
 
-	struct lval *err = lval_err(a->cell[0]->str);
+	struct lval *err = lval_err(a->cell[0]->charbuf);
 	lval_free(a);
 	return err;
 }
@@ -1104,10 +1105,10 @@ static struct lval *builtin_load(struct lenv *e, struct lval *a)
 	if (a->count != 1) {
 		return lerr_args_num(a, fname, 1);
 	}
-	if (a->cell[0]->type != LVAL_STR) {
-		return lerr_args_type(a, fname, LVAL_STR, a->type);
+	if (a->cell[0]->type != LVAL_CHARBUF) {
+		return lerr_args_type(a, fname, LVAL_CHARBUF, a->type);
 	}
-	return lenv_load(e, a->cell[0]->str);
+	return lenv_load(e, a->cell[0]->charbuf);
 }
 
 /* builtin math ops */
@@ -1232,8 +1233,7 @@ static struct lval *builtin_logical(struct lenv *e, struct lval *a, char *op)
 		if (a->count == 0) {
 			x->num = !x->num;
 		} else {
-			struct lval *err =
-				lerr_args_too_many(a, op, 0);
+			struct lval *err = lerr_args_too_many(a, op, 0);
 			lval_free(a);
 			return err;
 		}
@@ -1273,8 +1273,7 @@ static struct lval *builtin_bitwise(struct lenv *e, struct lval *a, char *op)
 		if (a->count == 0) {
 			x->num = ~x->num;
 		} else {
-			struct lval *err =
-				lerr_args_too_many(a, op, 0);
+			struct lval *err = lerr_args_too_many(a, op, 0);
 			lval_free(a);
 			return err;
 		}
@@ -1357,8 +1356,8 @@ static int lval_eq(struct lval *x, struct lval *y)
 		return strcmp(x->err, y->err) == 0;
 	case LVAL_SYM:
 		return strcmp(x->sym, y->sym) == 0;
-	case LVAL_STR:
-		return strcmp(x->str, y->str) == 0;
+	case LVAL_CHARBUF:
+		return strcmp(x->charbuf, y->charbuf) == 0;
 	case LVAL_SEXPR: /* fallthrough */
 	case LVAL_QEXPR:
 		if (x->count != y->count)
@@ -1514,10 +1513,10 @@ struct lval *builtin_join(struct lenv *e, struct lval *a)
 			if (last_type != LVAL_QEXPR)
 				return lerr_args_mult_type(a, fname, last_type,
 							   LVAL_QEXPR);
-		} else if (a->cell[i]->type == LVAL_STR) {
-			if (last_type != LVAL_STR)
+		} else if (a->cell[i]->type == LVAL_CHARBUF) {
+			if (last_type != LVAL_CHARBUF)
 				return lerr_args_mult_type(a, fname, last_type,
-							   LVAL_STR);
+							   LVAL_CHARBUF);
 		} else {
 			return lval_func_err(
 				a, fname,
@@ -1533,7 +1532,7 @@ struct lval *builtin_join(struct lenv *e, struct lval *a)
 		x = lval_pop(a, 0);
 		while (a->count)
 			x = lval_join_qexpr(x, lval_pop(a, 0));
-	} else if (a->cell[0]->type == LVAL_STR) {
+	} else if (a->cell[0]->type == LVAL_CHARBUF) {
 		x = lval_join_charbuf(e, a);
 	} else {
 		return lval_func_err(
@@ -1639,7 +1638,7 @@ char *ltype_name(int t)
 		return "Error";
 	case LVAL_SYM:
 		return "Symbol";
-	case LVAL_STR:
+	case LVAL_CHARBUF:
 		return "Charbuf";
 	case LVAL_SEXPR:
 		return "S-Expression";
