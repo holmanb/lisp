@@ -139,9 +139,9 @@ static void lenv_free(struct lenv *e);
 static struct lval *lerr_args_num_desc(struct lval *a, const char *fname,
 				       char *desc, int expected, int received);
 static struct lval *lerr_args_num(struct lval *lval, const char *fname,
-				  int expected, int received);
+				  int expected);
 static struct lval *lerr_args_too_many(struct lval *, const char *fname,
-				       int expected, int received);
+				       int expected);
 static struct lval *lerr_args_too_few(struct lval *, const char *fname,
 				      int expected, int received);
 static struct lval *lerr_args_type(struct lval *, const char *fname,
@@ -203,14 +203,13 @@ static struct lval *lval_call(struct lenv *e, struct lval *f, struct lval *a)
 {
 	if (f->builtin)
 		return f->builtin(e, a);
-	const char fname[] = "user function";
+	const char *fname = lenv_lookup_sym_by_val(e, a);
 
-	int given = a->count;
 	int total = f->formals->count;
 	while (a->count) {
 		if (f->formals->count == 0) {
 			lval_free(a);
-			return lerr_args_too_many(a, fname, given, total);
+			return lerr_args_too_many(a, fname, total);
 		}
 
 		/* pop first symbol from formals list */
@@ -550,7 +549,7 @@ static char *lval_to_str(struct lenv *e, struct lval *v)
 		else {
 			char *formals = lval_to_str(e, v->formals);
 			char *body = lval_to_str(e, v->body);
-			char *out = String("%s %s %s)", lenv_lookup_sym_by_val,
+			char *out = String("%s %s %s)", lenv_lookup_sym_by_val(e, v),
 					   formals, body);
 			free(formals);
 			free(body);
@@ -1001,7 +1000,7 @@ static struct lval *builtin_error(struct lenv *e, struct lval *a)
 {
 	char fname[] = "error";
 	if (a->count != 1)
-		return lerr_args_num(a, fname, 1, a->count);
+		return lerr_args_num(a, fname, 1);
 	if (a->cell[0]->type != LVAL_STR)
 		return lerr_args_type(a, fname, LVAL_STR, a->cell[0]->type);
 
@@ -1073,7 +1072,7 @@ static struct lval *builtin_op(struct lenv *e, struct lval *a, char *fname,
 static struct lval *builtin_assert(struct lenv *e, struct lval *a)
 {
 	if (a->count != 2)
-		return lerr_args_num(a, "assert", 2, a->count);
+		return lerr_args_num(a, "assert", 2);
 
 	struct lval *r1 = lval_eval(e, a->cell[0]);
 	struct lval *r2 = lval_eval(e, a->cell[1]);
@@ -1095,7 +1094,7 @@ static struct lval *builtin_type(struct lenv *e, struct lval *a)
 {
 	char fname[] = "type";
 	if (a->count != 1)
-		return lerr_args_num(a, fname, 1, a->count);
+		return lerr_args_num(a, fname, 1);
 	return lval_str(ltype_name(a->cell[0]->type));
 }
 
@@ -1103,7 +1102,7 @@ static struct lval *builtin_load(struct lenv *e, struct lval *a)
 {
 	char fname[] = "load";
 	if (a->count != 1) {
-		return lerr_args_num(a, fname, 1, a->count);
+		return lerr_args_num(a, fname, 1);
 	}
 	if (a->cell[0]->type != LVAL_STR) {
 		return lerr_args_type(a, fname, LVAL_STR, a->type);
@@ -1150,7 +1149,7 @@ static struct lval *builtin_put(struct lenv *e, struct lval *a)
 static struct lval *builtin_eq(struct lenv *e, struct lval *a)
 {
 	if (a->count != 2)
-		return lerr_args_num(a, "==", 2, a->count);
+		return lerr_args_num(a, "==", 2);
 	int ret = lval_eq(a->cell[0], a->cell[1]);
 	lval_free(a);
 	return lval_num(ret);
@@ -1159,7 +1158,7 @@ static struct lval *builtin_eq(struct lenv *e, struct lval *a)
 static struct lval *builtin_ne(struct lenv *e, struct lval *a)
 {
 	if (a->count != 2)
-		return lerr_args_num(a, "!=", 2, a->count);
+		return lerr_args_num(a, "!=", 2);
 	int ret = !lval_eq(a->cell[0], a->cell[1]);
 	lval_free(a);
 	return lval_num(ret);
@@ -1188,7 +1187,7 @@ static struct lval *builtin_le(struct lenv *e, struct lval *a)
 static struct lval *builtin_order(struct lenv *e, struct lval *a, char *op)
 {
 	if (a->count != 2)
-		return lerr_args_num(a, op, 2, a->count);
+		return lerr_args_num(a, op, 2);
 	if (a->cell[0]->type != LVAL_NUM)
 		return lerr_args_type(a, op, LVAL_NUM, a->type);
 	if (a->cell[1]->type != LVAL_NUM)
@@ -1234,7 +1233,7 @@ static struct lval *builtin_logical(struct lenv *e, struct lval *a, char *op)
 			x->num = !x->num;
 		} else {
 			struct lval *err =
-				lerr_args_too_many(a, op, 1, a->count + 1);
+				lerr_args_too_many(a, op, 0);
 			lval_free(a);
 			return err;
 		}
@@ -1275,7 +1274,7 @@ static struct lval *builtin_bitwise(struct lenv *e, struct lval *a, char *op)
 			x->num = ~x->num;
 		} else {
 			struct lval *err =
-				lerr_args_too_many(a, op, 1, a->count + 1);
+				lerr_args_too_many(a, op, 0);
 			lval_free(a);
 			return err;
 		}
@@ -1375,12 +1374,12 @@ static int lval_eq(struct lval *x, struct lval *y)
 }
 
 static struct lval *lerr_args_num(struct lval *a, const char *fname,
-				  int expected, int received)
+				  int expected)
 {
-	if (expected > received)
-		return lerr_args_too_few(a, fname, expected, received);
+	if (expected > a->count)
+		return lerr_args_too_few(a, fname, expected, a->count);
 	else
-		return lerr_args_too_many(a, fname, expected, received);
+		return lerr_args_too_many(a, fname, expected);
 }
 
 static struct lval *lerr_args_num_desc(struct lval *a, const char *fname,
@@ -1392,9 +1391,9 @@ static struct lval *lerr_args_num_desc(struct lval *a, const char *fname,
 }
 
 static struct lval *lerr_args_too_many(struct lval *a, const char *fname,
-				       int expected, int received)
+				       int expected)
 {
-	return lerr_args_num_desc(a, fname, "too many", expected, received);
+	return lerr_args_num_desc(a, fname, "too many", expected, a->count);
 }
 
 static struct lval *lerr_args_too_few(struct lval *a, const char *fname,
@@ -1430,9 +1429,9 @@ static struct lval *builtin_head(struct lenv *e, struct lval *a)
 {
 	const char fname[] = "head";
 	if (a->count != 1)
-		return lerr_args_too_many(a, fname, a->count, 1);
+		return lerr_args_too_many(a, fname, 1);
 	if (a->cell[0]->type != LVAL_QEXPR)
-		return lerr_args_type(a, fname, a->cell[0]->type, LVAL_QEXPR);
+		return lerr_args_type(a, fname, LVAL_QEXPR, a->cell[0]->type);
 	if (a->cell[0]->count == 0)
 		return lval_func_err(a, fname, "passed {}");
 
@@ -1446,7 +1445,7 @@ static struct lval *builtin_tail(struct lenv *e, struct lval *a)
 {
 	const char fname[] = "tail";
 	if (a->count != 1)
-		return lerr_args_too_many(a, fname, a->count, 1);
+		return lerr_args_too_many(a, fname, 1);
 	if (a->cell[0]->type != LVAL_QEXPR)
 		return lerr_args_type(a, fname, a->cell[0]->type, LVAL_QEXPR);
 	if (a->cell[0]->count == 0)
@@ -1467,7 +1466,7 @@ static struct lval *builtin_eval(struct lenv *e, struct lval *a)
 {
 	const char fname[] = "eval";
 	if (a->count != 1)
-		return lerr_args_too_many(a, fname, a->count, 1);
+		return lerr_args_too_many(a, fname, 1);
 	if (a->cell[0]->type != LVAL_QEXPR)
 		return lerr_args_type(a, fname, a->cell[0]->type, LVAL_QEXPR);
 
@@ -1482,16 +1481,14 @@ static struct lval *builtin_eval(struct lenv *e, struct lval *a)
 static struct lval *builtin_if(struct lenv *e, struct lval *a)
 {
 	const char fname[] = "eval";
-	if (a->count > 3)
-		return lerr_args_too_many(a, fname, a->count, 3);
-	if (a->count < 3)
-		return lerr_args_too_few(a, fname, a->count, 3);
+	if (a->count != 3)
+		return lerr_args_num(a, fname, 3);
 	if (a->cell[0]->type != LVAL_NUM)
-		return lerr_args_type(a, fname, a->cell[0]->type, LVAL_NUM);
+		return lerr_args_type(a, fname, LVAL_NUM, a->cell[0]->type);
 	if (a->cell[1]->type != LVAL_QEXPR)
-		return lerr_args_type(a, fname, a->cell[1]->type, LVAL_QEXPR);
+		return lerr_args_type(a, fname, LVAL_QEXPR, a->cell[1]->type);
 	if (a->cell[2]->type != LVAL_QEXPR)
-		return lerr_args_type(a, fname, a->cell[2]->type, LVAL_QEXPR);
+		return lerr_args_type(a, fname, LVAL_QEXPR, a->cell[2]->type);
 
 	struct lval *x;
 	a->cell[1]->type = LVAL_SEXPR;
@@ -1565,7 +1562,7 @@ static struct lval *lerr_verify_first_arg_is_qexpr_of_symbols(struct lval *a,
 	/* first arg is symbol list */
 	struct lval *syms = a->cell[0];
 	if (a->cell[0]->type != LVAL_QEXPR)
-		return lerr_args_type(a, fname, a->cell[0]->type, LVAL_QEXPR);
+		return lerr_args_type(a, fname, LVAL_QEXPR, a->cell[0]->type);
 
 	for (i = 0; i < syms->count; i++)
 		if (syms->cell[i]->type != LVAL_SYM)
@@ -1615,7 +1612,7 @@ static struct lval *builtin_lambda(struct lenv *e, struct lval *a)
 	const char fname[] = "\\";
 	int arg2_type = a->cell[1]->type;
 	if (a->count != 2)
-		return lerr_args_num(a, fname, 2, a->count);
+		return lerr_args_num(a, fname, 2);
 
 	struct lval *err = lerr_verify_first_arg_is_qexpr_of_symbols(a, fname);
 	if (err != NULL)
