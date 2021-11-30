@@ -3,6 +3,7 @@ LDFLAGS += -ledit -lmpc -L/usr/local/lib/
 SRCDIR += src
 TESTDIR += lsp
 SRC := $(shell find $(SRCDIR) -name '*.c')
+HDR := $(shell find $(SRCDIR) -name '*.h')
 OBJ := $(shell find $(SRCDIR) -name '*.o')
 LSP_TEST := $(shell find $(TESTDIR) -name 'test_*.lsp')
 LSP_LIB:= $(shell find $(TESTDIR) \( -name '*.lsp' ! -name 'test_*.lsp' \))
@@ -13,13 +14,13 @@ all: build tags
 
 lib:
 	make -C mpc build/libmpc.so
-	mv mpc/build/libmpc.so mpc
+	sudo make -C install
 
 build: $(SRC)
 	$(CC) $(CFLAGS) $(SRC) $(LDFLAGS) -o $(BIN)
 
 fmt:
-	$(CLANG_FORMAT) -i $(SRC)
+	$(CLANG_FORMAT) -i $(SRC) $(HDR)
 
 tags:
 	ctags -R .
