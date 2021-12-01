@@ -1,7 +1,6 @@
 #ifndef _LISP_H
 #define _LISP_H
 
-
 #include <mpc.h>
 
 struct lval;
@@ -103,8 +102,12 @@ static struct lval *lerr_args_num(struct lval *lval, const char *fname,
 				  int expected);
 static struct lval *lerr_args_too_many(struct lval *, const char *fname,
 				       int expected);
+static struct lval *lerr_args_too_many_variable(struct lval *, const char *fname,
+				       int max);
 static struct lval *lerr_args_too_few(struct lval *, const char *fname,
-				      int expected, int received);
+				      int expected);
+static struct lval *lerr_args_too_few_variable(struct lval *, const char *fname,
+				      int min);
 static struct lval *lerr_args_type(struct lval *, const char *fname,
 				   int expected, int received);
 static struct lval *lerr_args_mult_type(struct lval *, const char *fname,

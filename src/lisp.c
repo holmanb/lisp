@@ -95,13 +95,12 @@ static struct lval *lval_call(struct lenv *e, struct lval *f, struct lval *a)
 {
 	if (f->builtin)
 		return f->builtin(e, a);
-	const char *fname = lenv_lookup_sym_by_val(e, a);
+	const char *fname = lenv_lookup_sym_by_val(e, f);
 
-	int total = f->formals->count;
 	while (a->count) {
 		if (f->formals->count == 0) {
 			lval_free(a);
-			return lerr_args_too_many(a, fname, total);
+			return lerr_args_too_few_variable(f->formals, fname, 1);
 		}
 
 		/* pop first symbol from formals list */
@@ -877,6 +876,27 @@ static char *lenv_lookup_sym_by_val(struct lenv *e, struct lval *a)
 	return "\\";
 }
 
+static char *lval_args_to_str(struct lenv *e, struct lval *a)
+{
+	char *old_buf, *new_buf;
+
+	/* initialize empty buffer for first concat */
+	old_buf = xmalloc(1);
+	old_buf[0] = '\0';
+
+	/* append trailing space for all but last element */
+	while (a->count) {
+		struct lval *x = lval_pop(a, 0);
+		char *s = lval_to_str(e, x);
+		new_buf = String("%s%s", old_buf, s);
+		free(old_buf);
+		free(s);
+		free(x);
+		old_buf = new_buf;
+	}
+	return old_buf;
+}
+
 static struct lval *builtin_print(struct lenv *e, struct lval *a)
 {
 	int i;
@@ -892,13 +912,12 @@ static struct lval *builtin_print(struct lenv *e, struct lval *a)
 static struct lval *builtin_error(struct lenv *e, struct lval *a)
 {
 	char fname[] = "error";
-	if (a->count != 1)
-		return lerr_args_num(a, fname, 1);
-	if (a->cell[0]->type != LVAL_CHARBUF)
-		return lerr_args_type(a, fname, LVAL_CHARBUF, a->cell[0]->type);
+	if (a->count < 1)
+		return lerr_args_too_few_variable(a, fname, 1);
 
-	struct lval *err = lval_err(a->cell[0]->charbuf);
-	lval_free(a);
+	char *msg = lval_args_to_str(e, a);
+	struct lval *err = lval_err(msg);
+	free(msg);
 	return err;
 }
 
@@ -1041,9 +1060,15 @@ static struct lval *builtin_put(struct lenv *e, struct lval *a)
 
 static struct lval *builtin_eq(struct lenv *e, struct lval *a)
 {
-	if (a->count != 2)
-		return lerr_args_num(a, "==", 2);
-	int ret = lval_eq(a->cell[0], a->cell[1]);
+	if (a->count < 2)
+		return lerr_args_too_few_variable(a, "==", 2);
+	int i;
+	int ret;
+	for (i = 0; i < a->count; i++) {
+		ret = lval_eq(a->cell[i], a->cell[i + 1]);
+		if (ret == 0)
+			break;
+	}
 	lval_free(a);
 	return lval_num(ret);
 }
@@ -1268,7 +1293,7 @@ static struct lval *lerr_args_num(struct lval *a, const char *fname,
 				  int expected)
 {
 	if (expected > a->count)
-		return lerr_args_too_few(a, fname, expected, a->count);
+		return lerr_args_too_few(a, fname, expected);
 	else
 		return lerr_args_too_many(a, fname, expected);
 }
@@ -1287,10 +1312,24 @@ static struct lval *lerr_args_too_many(struct lval *a, const char *fname,
 	return lerr_args_num_desc(a, fname, "too many", expected, a->count);
 }
 
-static struct lval *lerr_args_too_few(struct lval *a, const char *fname,
-				      int expected, int received)
+static struct lval *lerr_args_too_many_variable(struct lval *a, const char *fname,
+				       int max)
 {
-	return lerr_args_num_desc(a, fname, "too few", expected, received);
+	return lval_func_err(a, fname, "passed too many arguments. Expected"
+			" no more than %d arguments", max);
+}
+
+static struct lval *lerr_args_too_few(struct lval *a, const char *fname,
+				      int expected)
+{
+	return lerr_args_num_desc(a, fname, "too few", expected, a->count);
+}
+
+static struct lval *lerr_args_too_few_variable(struct lval *a, const char *fname,
+				      int min)
+{
+	return lval_func_err(a, fname, "passed too few arguments. Expected"
+			" %d or more arguments", min);
 }
 
 static struct lval *lerr_args_type(struct lval *a, const char *fname,
@@ -1588,6 +1627,10 @@ int main(int argc, char *argv[])
 	} else {
 		/* repl loop */
 		puts("Press Ctrl+c to Exit\n");
+		struct lval *x = lenv_load(e, "./lsp/lib.lsp");
+		if (x->type == LVAL_ERR)
+			lval_println(e, x);
+		lval_free(x);
 		while (1) {
 			mpc_result_t r;
 			char *input = readline("lisp> ");
