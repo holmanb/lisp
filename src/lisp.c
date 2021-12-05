@@ -1,6 +1,4 @@
 #define _DEFAULT_SOURCE
-#include <stdlib.h>
-#include <stdio.h>
 #include <stdarg.h>
 #include <string.h>
 #include <errno.h>
@@ -8,78 +6,94 @@
 
 #include <editline/readline.h>
 #include <editline/history.h>
+#include <mpc.h>
 
 #include "lisp.h"
-#define die(fmt, ...)                                                          \
-	{                                                                      \
-		fprintf(stderr, fmt, __VA_ARGS__);                             \
-		exit(EXIT_FAILURE);                                            \
-	}                                                                      \
-	while (0)
+#include "lerr.h"
 
-#define xmalloc(size)                                                          \
-	({                                                                     \
-		void *_ret = malloc(size);                                     \
-		if (!_ret)                                                     \
-			die("%s", "failed to allocate memory\n");              \
-		_ret;                                                          \
-	})
+static char *lval_to_str(struct lenv *, struct lval *);
+static char *lval_expr_to_str(struct lenv *, struct lval *, char open,
+			      char close);
+static char *lenv_lookup_sym_by_val(struct lenv *e, struct lval *a);
+static int lenv_get_sym_pos(struct lenv *, char *);
+static struct lval *lenv_get(struct lenv *, struct lval *);
+static struct lval *lval_num(long x);
+static struct lval *lval_sexpr(void);
+static struct lval *lval_add(struct lval *v, struct lval *x);
+static struct lval *lval_eval(struct lenv *, struct lval *);
+static struct lval *lval_copy(struct lval *v);
+static struct lval *lval_take(struct lval *, int i);
+static struct lval *lval_pop(struct lval *, int i);
+static struct lval *lval_call(struct lenv *, struct lval *, struct lval *);
+static struct lval *lval_str(char *s);
+static struct lval *lval_err(const char *fmt, ...);
+
+static struct lval *builtin_print(struct lenv *e, struct lval *a);
+static struct lval *builtin_error(struct lenv *e, struct lval *a);
+static struct lval *builtin_assert(struct lenv *, struct lval *);
+
+static struct lval *builtin_load(struct lenv *, struct lval *);
+
+static struct lval *builtin_type(struct lenv *, struct lval *);
+
+static struct lval *builtin_op(struct lenv *, struct lval *, char *, char *);
+static struct lval *builtin_eval(struct lenv *, struct lval *);
+
+static struct lval *builtin_join(struct lenv *, struct lval *);
+static struct lval *builtin_list(struct lenv *, struct lval *);
+static struct lval *builtin_head(struct lenv *, struct lval *);
+static struct lval *builtin_tail(struct lenv *, struct lval *);
+
+static struct lval *builtin_add(struct lenv *, struct lval *);
+static struct lval *builtin_sub(struct lenv *, struct lval *);
+static struct lval *builtin_mul(struct lenv *, struct lval *);
+static struct lval *builtin_div(struct lenv *, struct lval *);
+static struct lval *builtin_mod(struct lenv *, struct lval *);
+
+static struct lval *builtin_def(struct lenv *, struct lval *);
+static struct lval *builtin_var(struct lenv *, struct lval *, char *);
+static struct lval *builtin_lambda(struct lenv *, struct lval *);
+static struct lval *builtin_put(struct lenv *, struct lval *);
+
+static struct lval *builtin_order(struct lenv *, struct lval *, char *);
+static struct lval *builtin_eq(struct lenv *e, struct lval *a);
+static struct lval *builtin_ne(struct lenv *e, struct lval *a);
+static struct lval *builtin_le(struct lenv *e, struct lval *a);
+static struct lval *builtin_lt(struct lenv *e, struct lval *a);
+static struct lval *builtin_ge(struct lenv *e, struct lval *a);
+static struct lval *builtin_gt(struct lenv *e, struct lval *a);
+
+static struct lval *builtin_if(struct lenv *e, struct lval *a);
+
+static struct lval *builtin_or(struct lenv *e, struct lval *a);
+static struct lval *builtin_and(struct lenv *e, struct lval *a);
+static struct lval *builtin_not(struct lenv *e, struct lval *a);
+
+static struct lval *builtin_bitwise_and(struct lenv *e, struct lval *a);
+static struct lval *builtin_bitwise_or(struct lenv *e, struct lval *a);
+static struct lval *builtin_bitwise_not(struct lenv *e, struct lval *a);
+static struct lval *builtin_bitwise_left_shift(struct lenv *e, struct lval *a);
+static struct lval *builtin_bitwise_right_shift(struct lenv *e, struct lval *a);
+static struct lval *builtin_bitwise_xor(struct lenv *e, struct lval *a);
+
+static int lval_eq(struct lval *, struct lval *);
+static void lval_free(struct lval *);
+struct lval *lval_func_err(struct lval *, const char *, const char *, ...);
+static struct lenv *lenv_new(void);
+static struct lval *lenv_get(struct lenv *, struct lval *);
+static struct lenv *lenv_copy(struct lenv *e);
+static void lenv_put(struct lenv *e, struct lval *k, struct lval *v);
+static void lenv_free(struct lenv *e);
 
 static char *version = "Lisp Version 0.0.0.0.1";
-
-enum {
-	LVAL_ERR,
-	LVAL_NUM,
-	LVAL_SYM,
-	LVAL_CHARBUF,
-	LVAL_FUN,
-	LVAL_SEXPR,
-	LVAL_QEXPR,
-};
-
-enum {
-	LERR_DIV_ZERO,
-	LERR_BAD_OP,
-	LERR_BAD_NUM,
-};
-
-/* current min size is int + 4 pointers (function lval)
- * which gives us a size of 4 + 8(4) = 36 Bytes on 64b
- * and 4 + 4(4) = 20 Bytest on 32b
- */
-struct lval {
-	int type;
-
-	union {
-
-		/* basic */
-		char *sym;
-		char *charbuf;
-		char *err;
-		long num;
-
-		/* Function */
-		struct {
-			lbuiltin builtin;
-			struct lenv *env;
-			struct lval *formals;
-			struct lval *body;
-		};
-
-		/* Expression */
-		struct {
-			struct lval **cell;
-			int count;
-		};
-	};
-};
-
-struct lenv {
-	struct lenv *par;
-	struct lval **vals;
-	char **syms;
-	int count;
-};
+static mpc_parser_t *Number;
+static mpc_parser_t *Symbol;
+static mpc_parser_t *Charbuf;
+static mpc_parser_t *Comment;
+static mpc_parser_t *Qexpr;
+static mpc_parser_t *Sexpr;
+static mpc_parser_t *Expr;
+static mpc_parser_t *Lisp;
 
 /* lval constructors */
 static struct lval *lval_num(long x)
@@ -358,23 +372,6 @@ static char *lval_expr_to_str(struct lenv *e, struct lval *v, char open,
 	return String("%c%s%c", open, new_buf, close);
 }
 
-static void lval_expr_print(struct lenv *e, struct lval *v, char open,
-			    char close)
-{
-	int i;
-	putchar(open);
-	if (v->count == 0)
-		goto end;
-	/* print trailing space for all but last element */
-	for (i = 0; i < v->count - 1; i++) {
-		lval_print(e, v->cell[i]);
-		putchar(' ');
-	}
-	lval_print(e, v->cell[i]);
-end:
-	putchar(close);
-}
-
 /* Variadic heap allocated string builder. */
 char *String(char *s, ...)
 {
@@ -392,30 +389,12 @@ char *String(char *s, ...)
 	return buf;
 }
 
-static char *fmt(const char *fmt, ...)
-{
-	const int size = 512;
-	va_list va;
-	va_start(va, fmt);
-	void *buf = xmalloc(size);
-	vsnprintf(buf, size, fmt, va);
-	va_end(va);
-	return buf;
-}
-
 static char *lval_str_to_str(struct lval *v)
 {
 	char *escaped = xmalloc(strlen(v->charbuf) + 1);
 	strcpy(escaped, v->charbuf);
 	escaped = mpcf_escape(escaped);
 	return escaped;
-}
-
-static void lval_print_str(struct lval *v)
-{
-	char *escaped = lval_str_to_str(v);
-	printf("\"%s\"", escaped);
-	free(escaped);
 }
 
 /* returns a str representation of an lval for internal usage
@@ -457,44 +436,6 @@ static char *lval_to_str(struct lenv *e, struct lval *v)
 	return String("Unknown lval type!");
 }
 
-static void lval_print(struct lenv *e, struct lval *v)
-{
-	switch (v->type) {
-	case LVAL_NUM:
-		printf("%li", v->num);
-		break;
-	case LVAL_ERR:
-		printf("\nErr: %s", v->err);
-		break;
-	case LVAL_SYM:
-		printf("%s", v->sym);
-		break;
-	case LVAL_CHARBUF:
-		lval_print_str(v);
-		break;
-	case LVAL_SEXPR:
-		lval_expr_print(e, v, '(', ')');
-		break;
-	case LVAL_QEXPR:
-		lval_expr_print(e, v, '{', '}');
-		break;
-	case LVAL_FUN:
-		if (v->builtin)
-			printf("<builtin function '%s'>",
-			       lenv_lookup_sym_by_val(e, v));
-		else {
-			printf("%s", lenv_lookup_sym_by_val(e, v));
-			lval_print(e, v->formals);
-			putchar(' ');
-			lval_print(e, v->body);
-			putchar(')');
-		}
-		break;
-	default:
-		printf("Unknown lval type!");
-		break;
-	}
-}
 
 static void lval_println(struct lenv *e, struct lval *v)
 {
@@ -593,26 +534,6 @@ struct lval *lval_take(struct lval *v, int i)
 	struct lval *x = lval_pop(v, i);
 	lval_free(v);
 	return x;
-}
-
-struct lval *lval_func_err(struct lval *a, const char *fname,
-			   const char *message, ...)
-{
-	const char format[] = "Function '%s' %s";
-	const int size = 512;
-
-	va_list va;
-	va_start(va, message);
-	char *concat = fmt(format, fname, message);
-
-	struct lval *v = xmalloc(sizeof(struct lval));
-	v->type = LVAL_ERR;
-
-	v->err = xmalloc(size);
-	vsnprintf(v->err, size, concat, va);
-	va_end(va);
-	free(concat);
-	return v;
 }
 
 static struct lval *lval_copy(struct lval *v)
@@ -1322,70 +1243,6 @@ static int lval_eq(struct lval *x, struct lval *y)
 	}
 }
 
-static struct lval *lerr_args_num(struct lval *a, const char *fname,
-				  int expected)
-{
-	if (expected > a->count)
-		return lerr_args_too_few(a, fname, expected);
-	else
-		return lerr_args_too_many(a, fname, expected);
-}
-
-static struct lval *lerr_args_num_desc(struct lval *a, const char *fname,
-				       char *desc, int expected, int received)
-{
-	return lval_func_err(a, fname,
-			     "passed %s arguments. Got %d, expected %d", desc,
-			     received, expected);
-}
-
-static struct lval *lerr_args_too_many(struct lval *a, const char *fname,
-				       int expected)
-{
-	return lerr_args_num_desc(a, fname, "too many", expected, a->count);
-}
-
-static struct lval *lerr_args_too_many_variable(struct lval *a, const char *fname,
-				       int max)
-{
-	return lval_func_err(a, fname, "passed too many arguments. Expected"
-			" no more than %d arguments", max);
-}
-
-static struct lval *lerr_args_too_few(struct lval *a, const char *fname,
-				      int expected)
-{
-	return lerr_args_num_desc(a, fname, "too few", expected, a->count);
-}
-
-static struct lval *lerr_args_too_few_variable(struct lval *a, const char *fname,
-				      int min)
-{
-	return lval_func_err(a, fname, "passed too few arguments. Expected"
-			" %d or more arguments", min);
-}
-
-static struct lval *lerr_args_type(struct lval *a, const char *fname,
-				   int expected, int received)
-{
-	return lval_func_err(a, fname,
-			     "passed incorrect type. Got %s, expected %s",
-			     ltype_name(received), ltype_name(expected));
-}
-
-static struct lval *lerr_args_mult_type(struct lval *a, const char *fname,
-					int type1, int type2)
-{
-	return lval_func_err(
-		a, fname,
-		"passed multiple types. Expected one type but receive %s and %s",
-		ltype_name(type1), ltype_name(type2));
-}
-
-static struct lval *lerr_arg_error(struct lval *a, const char *fname, char *msg)
-{
-	return lval_func_err(a, fname, msg);
-}
 
 /* builtin q-expr funcs */
 static struct lval *builtin_head(struct lenv *e, struct lval *a)
@@ -1582,7 +1439,6 @@ static struct lval *builtin_var(struct lenv *e, struct lval *a, char *fname)
 	}
 
 	/* assign copies of values to symbols */
-
 	if (strcmp(fname, "def") == 0)
 		for (i = 0; i < syms->count; i++)
 			lenv_def(e, syms->cell[i], a->cell[i + 1]);
