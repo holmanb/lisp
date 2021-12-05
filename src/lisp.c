@@ -1,3 +1,4 @@
+#define _DEFAULT_SOURCE
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdarg.h>
@@ -9,7 +10,6 @@
 #include <editline/history.h>
 
 #include "lisp.h"
-
 #define die(fmt, ...)                                                          \
 	{                                                                      \
 		fprintf(stderr, fmt, __VA_ARGS__);                             \
@@ -51,13 +51,12 @@ struct lval {
 	int type;
 
 	union {
+
 		/* basic */
-		union {
-			char *sym;
-			char *charbuf;
-			char *err;
-			long num;
-		};
+		char *sym;
+		char *charbuf;
+		char *err;
+		long num;
 
 		/* Function */
 		struct {
@@ -110,9 +109,15 @@ static struct lval *lval_call(struct lenv *e, struct lval *f, struct lval *a)
 		if (strcmp(sym->sym, "&") == 0) {
 			if (f->formals->count != 1) {
 				lval_free(a);
-				return lval_func_err(
+				char *str = lval_to_str(e, a);
+				struct lval *out = lval_func_err(
 					f->formals, fname,
-					"& must be followed by another symbol");
+					"& must be followed by one symbol, "
+					" in %s received %d: %s",
+					fname, f->formals->count, str);
+				free(str);
+				lval_free(sym);
+				return out;
 			}
 
 			/* Bind variable formal to remaining args */
@@ -277,7 +282,7 @@ static struct lval *lval_read_num(mpc_ast_t *t)
 static struct lval *lval_add(struct lval *v, struct lval *x)
 {
 	v->count++;
-	v->cell = realloc(v->cell, sizeof(struct lval *) * v->count);
+	v->cell = reallocarray(v->cell, v->count, sizeof(struct lval *));
 	v->cell[v->count - 1] = x;
 	return v;
 }
@@ -294,14 +299,14 @@ static struct lval *lval_read(mpc_ast_t *t)
 	if (strstr(t->tag, "charbuf"))
 		return lval_read_str(t);
 
-	/* create empty list */
+	/* create empty list for root (>) or sexpr*/
 	struct lval *x = NULL;
-	if (strcmp(t->tag, ">") == 0)
-		x = lval_sexpr();
-	if (strcmp(t->tag, "sexpr"))
-		x = lval_sexpr();
 	if (strstr(t->tag, "qexpr"))
 		x = lval_qexpr();
+	else if (strcmp(t->tag, ">") == 0)
+		x = lval_sexpr();
+	else if (strcmp(t->tag, "sexpr"))
+		x = lval_sexpr();
 
 	/* put expression in list */
 	for (i = 0; i < t->children_num; i++) {
@@ -579,7 +584,7 @@ struct lval *lval_pop(struct lval *v, int i)
 	memmove(&v->cell[i], &v->cell[i + 1],
 		sizeof(struct lval *) * (v->count - i - 1));
 	v->count--;
-	v->cell = realloc(v->cell, sizeof(struct lval *) * v->count);
+	v->cell = reallocarray(v->cell, v->count, sizeof(struct lval *));
 	return x;
 }
 
@@ -651,14 +656,18 @@ static struct lval *lval_copy(struct lval *v)
 	case LVAL_QEXPR: {
 		int i;
 		x->count = v->count;
-		x->cell = xmalloc(sizeof(struct lval *) * x->count);
+		if (x->count)
+			x->cell = xmalloc(sizeof(struct lval *) * x->count);
+		else
+			x->cell = NULL;
 		for (i = 0; i < x->count; i++) {
 			x->cell[i] = lval_copy(v->cell[i]);
 		}
 		break;
 	}
 	default:
-		lval_err("Unknown lval type!");
+		/* Leaks mem, but this should never happen */
+		lval_err(String("Unknown lval type!%s", ltype_name(v->type)));
 	}
 	return x;
 }
@@ -751,8 +760,8 @@ static void lenv_put(struct lenv *e, struct lval *k, struct lval *v)
 
 	/* does not exist, create*/
 	e->count++;
-	e->vals = realloc(e->vals, sizeof(struct lval *) * e->count);
-	e->syms = realloc(e->syms, sizeof(char *) * e->count);
+	e->vals = reallocarray(e->vals, e->count, sizeof(struct lval *));
+	e->syms = reallocarray(e->syms, e->count, sizeof(char *));
 
 	/* copy */
 	e->vals[e->count - 1] = lval_copy(v);
@@ -901,8 +910,9 @@ static struct lval *builtin_print(struct lenv *e, struct lval *a)
 {
 	int i;
 	for (i = 0; i < a->count; i++) {
-		lval_print(e, a->cell[i]);
-		putchar(' ');
+		char *val = lval_to_str(e, a->cell[i]);
+		printf("%s ", val);
+		free(val);
 	}
 	putchar('\n');
 	lval_free(a);
@@ -912,13 +922,16 @@ static struct lval *builtin_print(struct lenv *e, struct lval *a)
 static struct lval *builtin_error(struct lenv *e, struct lval *a)
 {
 	char fname[] = "error";
-	if (a->count < 1)
-		return lerr_args_too_few_variable(a, fname, 1);
-
-	char *msg = lval_args_to_str(e, a);
-	struct lval *err = lval_err(msg);
-	free(msg);
-	return err;
+	struct lval *out;
+	if (a->count < 1) {
+		out = lerr_args_too_few_variable(a, fname, 1);
+	} else {
+		char *msg = lval_args_to_str(e, a);
+		out = lval_err(msg);
+		free(msg);
+	}
+	lval_free(a);
+	return out;
 }
 
 static struct lval *builtin_op(struct lenv *e, struct lval *a, char *fname,
@@ -983,43 +996,55 @@ static struct lval *builtin_op(struct lenv *e, struct lval *a, char *fname,
  */
 static struct lval *builtin_assert(struct lenv *e, struct lval *a)
 {
-	if (a->count != 2)
-		return lerr_args_num(a, "assert", 2);
+	if (a->count != 2) {
+		struct lval *out = lerr_args_num(a, "assert", 2);
+		lval_free(a);
+		return out;
+	}
 
+	struct lval *ret;
 	struct lval *r1 = lval_eval(e, a->cell[0]);
 	struct lval *r2 = lval_eval(e, a->cell[1]);
 	if (lval_eq(r1, r2)) {
-		free(a);
-		return lval_num(1);
+		ret = lval_num(1);
 	} else {
 		char *expr1 = lval_to_str(e, a->cell[0]);
 		char *expr2 = lval_to_str(e, a->cell[1]);
-		struct lval *out =
-			lval_err("assert failed [%s] != [%s]", expr1, expr2);
-
-		free(a);
-		return out;
+		ret = lval_err("assert failed [%s] != [%s]", expr1, expr2);
+		free(expr1);
+		free(expr2);
 	}
+	lval_free(a);
+	return ret;
 }
 
 static struct lval *builtin_type(struct lenv *e, struct lval *a)
 {
 	char fname[] = "type";
-	if (a->count != 1)
-		return lerr_args_num(a, fname, 1);
-	return lval_str(ltype_name(a->cell[0]->type));
+	struct lval *out;
+	if (a->count != 1) {
+		out = lerr_args_num(a, fname, 1);
+	} else {
+		out = lval_str(ltype_name(a->cell[0]->type));
+	}
+	lval_free(a);
+	return out;
 }
 
 static struct lval *builtin_load(struct lenv *e, struct lval *a)
 {
 	char fname[] = "load";
+	struct lval *out;
 	if (a->count != 1) {
-		return lerr_args_num(a, fname, 1);
+		out = lerr_args_num(a, fname, 1);
 	}
-	if (a->cell[0]->type != LVAL_CHARBUF) {
-		return lerr_args_type(a, fname, LVAL_CHARBUF, a->type);
+	else if (a->cell[0]->type != LVAL_CHARBUF) {
+		out = lerr_args_type(a, fname, LVAL_CHARBUF, a->type);
+	} else {
+		out = lenv_load(e, a->cell[0]->charbuf);
 	}
-	return lenv_load(e, a->cell[0]->charbuf);
+	lval_free(a);
+	return out;
 }
 
 /* builtin math ops */
@@ -1060,11 +1085,13 @@ static struct lval *builtin_put(struct lenv *e, struct lval *a)
 
 static struct lval *builtin_eq(struct lenv *e, struct lval *a)
 {
-	if (a->count < 2)
+	if (a->count < 2) {
+		lval_free(a);
 		return lerr_args_too_few_variable(a, "==", 2);
+	}
 	int i;
 	int ret;
-	for (i = 0; i < a->count; i++) {
+	for (i = 0; i < a->count - 1; i++) {
 		ret = lval_eq(a->cell[i], a->cell[i + 1]);
 		if (ret == 0)
 			break;
@@ -1075,8 +1102,10 @@ static struct lval *builtin_eq(struct lenv *e, struct lval *a)
 
 static struct lval *builtin_ne(struct lenv *e, struct lval *a)
 {
-	if (a->count != 2)
+	if (a->count != 2) {
+		lval_free(a);
 		return lerr_args_num(a, "!=", 2);
+	}
 	int ret = !lval_eq(a->cell[0], a->cell[1]);
 	lval_free(a);
 	return lval_num(ret);
@@ -1104,30 +1133,36 @@ static struct lval *builtin_le(struct lenv *e, struct lval *a)
 
 static struct lval *builtin_order(struct lenv *e, struct lval *a, char *op)
 {
+	struct lval *out;
 	if (a->count != 2)
-		return lerr_args_num(a, op, 2);
-	if (a->cell[0]->type != LVAL_NUM)
-		return lerr_args_type(a, op, LVAL_NUM, a->type);
-	if (a->cell[1]->type != LVAL_NUM)
-		return lerr_args_type(a, op, LVAL_NUM, a->type);
-	int num1 = a->cell[0]->num;
-	int num2 = a->cell[1]->num;
-	int ret;
-	if (strcmp(">", op) == 0) {
-		ret = (num1 > num2);
-	} else if (strcmp(">=", op) == 0) {
-		ret = (num1 >= num2);
-	} else if (strcmp("<", op) == 0) {
-		ret = (num1 < num2);
-	} else if (strcmp("<=", op) == 0) {
-		ret = (num1 <= num2);
-	} else {
-		return lerr_arg_error(
-			a, op,
-			"comparison op is not a member of set(>, >=, <, <=)");
+		out = lerr_args_num(a, op, 2);
+	else if (a->cell[0]->type != LVAL_NUM)
+		out = lerr_args_type(a, op, LVAL_NUM, a->type);
+	else if (a->cell[1]->type != LVAL_NUM)
+		out = lerr_args_type(a, op, LVAL_NUM, a->type);
+	else {
+
+		int num1 = a->cell[0]->num;
+		int num2 = a->cell[1]->num;
+		int ret;
+		if (strcmp(">", op) == 0) {
+			ret = (num1 > num2);
+		} else if (strcmp(">=", op) == 0) {
+			ret = (num1 >= num2);
+		} else if (strcmp("<", op) == 0) {
+			ret = (num1 < num2);
+		} else if (strcmp("<=", op) == 0) {
+			ret = (num1 <= num2);
+		} else {
+			lval_free(a);
+			return lerr_arg_error(
+				a, op,
+				"comparison op is not a member of set(>, >=, <, <=)");
+		}
+		out = lval_num(ret);
 	}
 	lval_free(a);
-	return lval_num(ret);
+	return out;
 }
 
 static struct lval *builtin_logical(struct lenv *e, struct lval *a, char *op)
@@ -1358,32 +1393,42 @@ static struct lval *lerr_arg_error(struct lval *a, const char *fname, char *msg)
 static struct lval *builtin_head(struct lenv *e, struct lval *a)
 {
 	const char fname[] = "head";
+	struct lval *out;
 	if (a->count != 1)
-		return lerr_args_too_many(a, fname, 1);
-	if (a->cell[0]->type != LVAL_QEXPR)
-		return lerr_args_type(a, fname, LVAL_QEXPR, a->cell[0]->type);
-	if (a->cell[0]->count == 0)
-		return lval_func_err(a, fname, "passed {}");
-
-	struct lval *v = lval_take(a, 0);
-	while (v->count > 1)
-		lval_free(lval_pop(v, 1));
-	return v;
+		out = lerr_args_too_many(a, fname, 1);
+	else if (a->cell[0]->type != LVAL_QEXPR)
+		out = lerr_args_type(a, fname, LVAL_QEXPR, a->cell[0]->type);
+	else if (a->cell[0]->count == 0)
+		out = lval_func_err(a, fname, "passed {}");
+	else {
+		/* a freed in lval_take */
+		out = lval_take(a, 0);
+		while (out->count > 1)
+			lval_free(lval_pop(out, 1));
+		return out;
+	}
+	lval_free(a);
+	return out;
 }
 
 static struct lval *builtin_tail(struct lenv *e, struct lval *a)
 {
 	const char fname[] = "tail";
+	struct lval *out;
 	if (a->count != 1)
-		return lerr_args_too_many(a, fname, 1);
-	if (a->cell[0]->type != LVAL_QEXPR)
-		return lerr_args_type(a, fname, a->cell[0]->type, LVAL_QEXPR);
-	if (a->cell[0]->count == 0)
-		return lval_func_err(a, fname, "passed {}");
-
-	struct lval *v = lval_take(a, 0);
-	lval_free(lval_pop(v, 0));
-	return v;
+		out = lerr_args_too_many(a, fname, 1);
+	else if (a->cell[0]->type != LVAL_QEXPR)
+		out = lerr_args_type(a, fname, LVAL_QEXPR, a->cell[0]->type);
+	else if (a->cell[0]->count == 0)
+		out = lval_func_err(a, fname, "passed {}");
+	else {
+		/* a freed in lval_take */
+		out = lval_take(a, 0);
+		lval_free(lval_pop(out, 0));
+		return out;
+	}
+	lval_free(a);
+	return out;
 }
 
 static struct lval *builtin_list(struct lenv *e, struct lval *a)
@@ -1395,14 +1440,20 @@ static struct lval *builtin_list(struct lenv *e, struct lval *a)
 static struct lval *builtin_eval(struct lenv *e, struct lval *a)
 {
 	const char fname[] = "eval";
+	struct lval *out;
 	if (a->count != 1)
-		return lerr_args_too_many(a, fname, 1);
-	if (a->cell[0]->type != LVAL_QEXPR)
-		return lerr_args_type(a, fname, a->cell[0]->type, LVAL_QEXPR);
+		out = lerr_args_too_many(a, fname, 1);
+	else if (a->cell[0]->type != LVAL_QEXPR)
+		out = lerr_args_type(a, fname, a->cell[0]->type, LVAL_QEXPR);
+	else {
+		/* a freed in lval_take */
+		out = lval_take(a, 0);
+		out->type = LVAL_SEXPR;
+		return lval_eval(e, out);
+	}
+	lval_free(a);
+	return out;
 
-	struct lval *x = lval_take(a, 0);
-	x->type = LVAL_SEXPR;
-	return lval_eval(e, x);
 }
 
 /* (if condition {execute if cond true} {execute if cond false})
@@ -1411,69 +1462,75 @@ static struct lval *builtin_eval(struct lenv *e, struct lval *a)
 static struct lval *builtin_if(struct lenv *e, struct lval *a)
 {
 	const char fname[] = "eval";
+	struct lval *out;
 	if (a->count != 3)
-		return lerr_args_num(a, fname, 3);
-	if (a->cell[0]->type != LVAL_NUM)
-		return lerr_args_type(a, fname, LVAL_NUM, a->cell[0]->type);
-	if (a->cell[1]->type != LVAL_QEXPR)
-		return lerr_args_type(a, fname, LVAL_QEXPR, a->cell[1]->type);
-	if (a->cell[2]->type != LVAL_QEXPR)
-		return lerr_args_type(a, fname, LVAL_QEXPR, a->cell[2]->type);
+		out = lerr_args_num(a, fname, 3);
+	else if (a->cell[0]->type != LVAL_NUM)
+		out = lerr_args_type(a, fname, LVAL_NUM, a->cell[0]->type);
+	else if (a->cell[1]->type != LVAL_QEXPR)
+		out = lerr_args_type(a, fname, LVAL_QEXPR, a->cell[1]->type);
+	else if (a->cell[2]->type != LVAL_QEXPR)
+		out = lerr_args_type(a, fname, LVAL_QEXPR, a->cell[2]->type);
+	else {
+		a->cell[1]->type = LVAL_SEXPR;
+		a->cell[2]->type = LVAL_SEXPR;
 
-	struct lval *x;
-	a->cell[1]->type = LVAL_SEXPR;
-	a->cell[2]->type = LVAL_SEXPR;
-
-	/* conditionally execute the first or second qexpr*/
-	if (a->cell[0]->num)
-		x = lval_eval(e, lval_pop(a, 1));
-	else
-		x = lval_eval(e, lval_pop(a, 2));
-
+		/* conditionally execute the first or second qexpr*/
+		if (a->cell[0]->num)
+			out = lval_eval(e, lval_pop(a, 1));
+		else
+			out = lval_eval(e, lval_pop(a, 2));
+	}
 	lval_free(a);
-	return x;
+	return out;
 }
 
 struct lval *builtin_join(struct lenv *e, struct lval *a)
 {
 	int i;
 	const char fname[] = "join";
+	struct lval *out = NULL;
 	int last_type = a->cell[0]->type;
 	for (i = 0; i < a->count; i++) {
 		if (a->cell[i]->type == LVAL_QEXPR) {
-			if (last_type != LVAL_QEXPR)
-				return lerr_args_mult_type(a, fname, last_type,
+			if (last_type != LVAL_QEXPR) {
+				out = lerr_args_mult_type(a, fname, last_type,
 							   LVAL_QEXPR);
+				break;
+			}
 		} else if (a->cell[i]->type == LVAL_CHARBUF) {
-			if (last_type != LVAL_CHARBUF)
-				return lerr_args_mult_type(a, fname, last_type,
+			if (last_type != LVAL_CHARBUF) {
+				out = lerr_args_mult_type(a, fname, last_type,
 							   LVAL_CHARBUF);
+				break;
+			}
 		} else {
-			return lval_func_err(
+			out = lval_func_err(
 				a, fname,
 				"Function %s: expected argument types in set(%s, %s), received: %s",
 				fname, ltype_name(LVAL_QEXPR),
 				ltype_name(LVAL_QEXPR),
 				ltype_name(a->cell[i]->type));
+			break;
 		}
 	}
-
-	struct lval *x;
-	if (a->cell[0]->type == LVAL_QEXPR) {
-		x = lval_pop(a, 0);
-		while (a->count)
-			x = lval_join_qexpr(x, lval_pop(a, 0));
-	} else if (a->cell[0]->type == LVAL_CHARBUF) {
-		x = lval_join_charbuf(e, a);
-	} else {
-		return lval_func_err(
-			a, fname,
-			"Function %s: expected argument types in set(%s, %s), received: %s",
-			fname, ltype_name(LVAL_QEXPR), ltype_name(LVAL_QEXPR),
-			ltype_name(a->cell[0]->type));
+	if (!out) {
+		if (a->cell[0]->type == LVAL_QEXPR) {
+			out = lval_pop(a, 0);
+			while (a->count)
+				out = lval_join_qexpr(out, lval_pop(a, 0));
+		} else if (a->cell[0]->type == LVAL_CHARBUF) {
+			out = lval_join_charbuf(e, a);
+		} else {
+			out = lval_func_err(
+				a, fname,
+				"Function %s: expected argument types in set(%s, %s), received: %s",
+				fname, ltype_name(LVAL_QEXPR), ltype_name(LVAL_QEXPR),
+				ltype_name(a->cell[0]->type));
+		}
 	}
-
-	return x;
+	lval_free(a);
+	return out;
 }
 
 /*
@@ -1506,8 +1563,10 @@ static struct lval *builtin_var(struct lenv *e, struct lval *a, char *fname)
 {
 	int i;
 	struct lval *err = lerr_verify_first_arg_is_qexpr_of_symbols(a, fname);
-	if (err != NULL)
+	if (err != NULL) {
+		lval_free(a);
 		return err;
+	}
 
 	/* first arg is qexpr of symbols */
 	struct lval *syms = a->cell[0];
@@ -1520,6 +1579,7 @@ static struct lval *builtin_var(struct lenv *e, struct lval *a, char *fname)
 			"\tlen(%s) == (%d) symbol(s) given but %d values given",
 			expected_syms, syms->count, a->count - 1);
 		free(expected_syms);
+		lval_free(a);
 		return tmp;
 	}
 
@@ -1540,22 +1600,23 @@ static struct lval *builtin_var(struct lenv *e, struct lval *a, char *fname)
 static struct lval *builtin_lambda(struct lenv *e, struct lval *a)
 {
 	const char fname[] = "\\";
+	struct lval *out = NULL;
 	int arg2_type = a->cell[1]->type;
 	if (a->count != 2)
-		return lerr_args_num(a, fname, 2);
-
-	struct lval *err = lerr_verify_first_arg_is_qexpr_of_symbols(a, fname);
-	if (err != NULL)
-		return err;
-
-	if (arg2_type != LVAL_QEXPR)
-		return lerr_args_type(a, fname, LVAL_QEXPR, arg2_type);
-
-	/* pop first two args and pass them to lval_lambda */
-	struct lval *formals = lval_pop(a, 0);
-	struct lval *body = lval_pop(a, 0);
+		out = lerr_args_num(a, fname, 2);
+	else if (arg2_type != LVAL_QEXPR)
+		out = lerr_args_type(a, fname, LVAL_QEXPR, arg2_type);
+	else
+		out = lerr_verify_first_arg_is_qexpr_of_symbols(a, fname);
+	if (!out) {
+		/* pop first two args and pass them to lval_lambda */
+		struct lval *formals = lval_pop(a, 0);
+		struct lval *body = lval_pop(a, 0);
+		lval_free(a);
+		return lval_lambda(formals, body);
+	}
 	lval_free(a);
-	return lval_lambda(formals, body);
+	return out;
 }
 
 char *ltype_name(int t)
@@ -1575,8 +1636,8 @@ char *ltype_name(int t)
 		return "S-Expression";
 	case LVAL_QEXPR:
 		return "Q-Expression";
-	default:
-		return "Unknown";
+	default: /* leak, but this should never happen */
+		return String("Unknown: %d", t);
 	}
 }
 
