@@ -5,11 +5,15 @@ TESTDIR += lsp
 SRC := $(shell find $(SRCDIR) -name '*.c')
 HDR := $(shell find $(SRCDIR) -name '*.h')
 OBJ := $(shell find $(SRCDIR) -name '*.o')
+CODE := $(SRC) $(HDR)
 LSP_TEST := $(shell find $(TESTDIR) -name 'test_*.lsp')
 LSP_LIB:= $(shell find $(TESTDIR) \( -name '*.lsp' ! -name 'test_*.lsp' \))
 BIN = lisp
 CLANG_FORMAT = clang-format-11
 TEST = ./$(BIN) $(LSP_LIB) $(LSP_TEST)
+PROFRAW = tests.profraw
+PROFDATA = tests.profdata
+
 .PHONY: all
 all: build tags
 
@@ -18,20 +22,19 @@ lib:
 	make -C mpc build/libmpc.so
 	sudo make -C install
 
-.PHONY: build
-build: $(SRC)
+build: $(CODE)
 	$(CC) $(CFLAGS) $(SRC) $(LDFLAGS) -o $(BIN)
 
 .PHONY: fmt
 fmt:
 	$(CLANG_FORMAT) -i $(SRC) $(HDR)
 
-tags: $(SRC)
+tags: $(CODE)
 	ctags -R .
 
 .PHONY: clean
 clean:
-	@rm $(OBJ) $(BIN) tags
+	@rm $(OBJ) $(BIN) tags $(PROFRAW) $(PROFDATA)
 
 .PHONY: clean-lib
 clean-lib:
@@ -39,6 +42,12 @@ clean-lib:
 
 .PHONY: clean-all
 clean-all: clean clean-lib
+
+
+.PHONY: test-valgrind
+test-asan: all
+	clang $(CFLAGS) -fsanitize=address $(SRC) $(LDFLAGS) -o $(BIN)
+	$(TEST)
 
 
 .PHONY: test-valgrind
@@ -56,6 +65,18 @@ test-valgrind-dbg: all
 		--track-origins=yes                    \
 		--vgdb-error=0                         \
 		$(TEST)
+
+.PHONY:coverage
+coverage: $(CODE)
+	clang \
+		-fprofile-instr-generate \
+		-fcoverage-mapping \
+		-Wno-gnu-zero-variadic-macro-arguments \
+		$(CFLAGS) $(SRC) $(LDFLAGS) -o $(BIN)
+	LLVM_PROFILE_FILE="$(PROFRAW)" $(TEST)
+	llvm-profdata merge -sparse $(PROFRAW) -o $(PROFDATA)
+	llvm-cov show $(TEST) -instr-profile=$(PROFDATA)
+	llvm-cov report $(TEST) -instr-profile=$(PROFDATA) --show-functions $(CODE)
 
 .PHONY: test
 test: all

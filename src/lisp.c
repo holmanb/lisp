@@ -183,11 +183,12 @@ static struct lval *lval_sym(char *s)
 static struct lval *lval_read_str(mpc_ast_t *t)
 {
 	t->contents[strlen(t->contents) - 1] = '\0';
-	char *unescaped = malloc(strlen(t->contents + 1) + 1);
-	strcpy(unescaped, t->contents + 1);
+	char *buf = xmalloc(strlen(t->contents + 1) + 1);
+	char *unescaped;
+	strcpy(buf, t->contents + 1);
 
 	/* pass through the unescape function */
-	unescaped = mpcf_unescape(unescaped);
+	unescaped = mpcf_unescape(buf);
 	struct lval *str = lval_str(unescaped);
 	free(unescaped);
 	return str;
@@ -197,8 +198,8 @@ static struct lval *lval_str(char *s)
 {
 	struct lval *v = xmalloc(sizeof(struct lval));
 	v->type = LVAL_CHARBUF;
-	v->sym = xmalloc(strlen(s) + 1);
-	strcpy(v->sym, s);
+	v->charbuf = xmalloc(strlen(s) + 1);
+	strcpy(v->charbuf, s);
 	return v;
 }
 
@@ -290,23 +291,25 @@ static struct lval *lval_add(struct lval *v, struct lval *x)
 static struct lval *lval_read(mpc_ast_t *t)
 {
 	int i;
+	struct lval *x = NULL;
 
 	/* return conversion to type */
 	if (strstr(t->tag, "number"))
 		return lval_read_num(t);
-	if (strstr(t->tag, "symbol"))
+	else if (strstr(t->tag, "symbol"))
 		return lval_sym(t->contents);
-	if (strstr(t->tag, "charbuf"))
+	else if (strstr(t->tag, "charbuf"))
 		return lval_read_str(t);
 
 	/* create empty list for root (>) or sexpr*/
-	struct lval *x = NULL;
-	if (strstr(t->tag, "qexpr"))
+	else if (strstr(t->tag, "qexpr"))
 		x = lval_qexpr();
 	else if (strcmp(t->tag, ">") == 0)
 		x = lval_sexpr();
 	else if (strcmp(t->tag, "sexpr"))
 		x = lval_sexpr();
+	else
+		die("Invalid tag %s in lval_read", t->tag);
 
 	/* put expression in list */
 	for (i = 0; i < t->children_num; i++) {
@@ -379,9 +382,6 @@ char *String(char *s, ...)
 	char *buf = xmalloc(size);
 	va_list va;
 	va_start(va, s);
-
-	/* Allocate 512 bytes of space */
-	buf = malloc(512);
 
 	/* printf the error string with a maximum of 511 characters */
 	vsnprintf(buf, 511, s, va);
@@ -498,8 +498,9 @@ static void lval_print(struct lenv *e, struct lval *v)
 
 static void lval_println(struct lenv *e, struct lval *v)
 {
-	lval_print(e, v);
-	putchar('\n');
+	char *str = lval_to_str(e, v);
+	printf("%s\n", str);
+	free(str);
 }
 
 struct lval *lval_eval_sexpr(struct lenv *e, struct lval *v)
@@ -562,7 +563,6 @@ struct lval *lval_join_charbuf(struct lenv *e, struct lval *a)
 	}
 	struct lval *out = lval_str(buf);
 	free(buf);
-	free(a);
 	return out;
 }
 
@@ -617,13 +617,14 @@ struct lval *lval_func_err(struct lval *a, const char *fname,
 
 static struct lval *lval_copy(struct lval *v)
 {
-	struct lval *x = xmalloc(sizeof(struct lval));
-
-	x->type = v->type;
+	struct lval *x;
+	int i;
 
 	switch (v->type) {
 	/* copy direct */
 	case LVAL_FUN:
+		x = xmalloc(sizeof(struct lval));
+		x->type = v->type;
 		if (v->builtin)
 			x->builtin = v->builtin;
 		else {
@@ -634,40 +635,38 @@ static struct lval *lval_copy(struct lval *v)
 		}
 		break;
 	case LVAL_NUM:
-		x->num = v->num;
+		x = lval_num(v->num);
 		break;
 
 	/* copy strings */
 	case LVAL_ERR:
-		x->err = xmalloc(strlen(v->err) + 1);
-		strcpy(x->err, v->err);
+		x = lval_err(v->err);
 		break;
 	case LVAL_SYM:
-		x->sym = xmalloc(strlen(v->sym) + 1);
-		strcpy(x->sym, v->sym);
+		x = lval_sym(v->sym);
 		break;
 	case LVAL_CHARBUF:
-		x->sym = xmalloc(strlen(v->charbuf) + 1);
-		strcpy(x->charbuf, v->charbuf);
+		x = lval_str(v->charbuf);
 		break;
 
 	/* copy lists */
 	case LVAL_SEXPR: /*fallthrough*/
-	case LVAL_QEXPR: {
-		int i;
+	case LVAL_QEXPR:
+		x = xmalloc(sizeof(struct lval));
+		x->type = v->type;
 		x->count = v->count;
 		if (x->count)
 			x->cell = xmalloc(sizeof(struct lval *) * x->count);
 		else
 			x->cell = NULL;
-		for (i = 0; i < x->count; i++) {
+		for (i = 0; i < x->count; i++)
 			x->cell[i] = lval_copy(v->cell[i]);
-		}
 		break;
-	}
 	default:
 		/* Leaks mem, but this should never happen */
-		lval_err(String("Unknown lval type!%s", ltype_name(v->type)));
+		x = xmalloc(sizeof(struct lval));
+		x = lval_err(String("Unknown lval type!%s", ltype_name(v->type)));
+		break;
 	}
 	return x;
 }
@@ -728,13 +727,13 @@ static struct lval *lenv_get(struct lenv *e, struct lval *l)
 static struct lenv *lenv_copy(struct lenv *e)
 {
 	int i;
-	struct lenv *n = malloc(sizeof(struct lenv));
+	struct lenv *n = xmalloc(sizeof(struct lenv));
 	n->par = e->par;
 	n->count = e->count;
-	n->syms = malloc(sizeof(char *) * n->count);
-	n->vals = malloc(sizeof(struct lval *) * n->count);
+	n->syms = xmalloc(sizeof(char *) * n->count);
+	n->vals = xmalloc(sizeof(struct lval *) * n->count);
 	for (i = 0; i < e->count; i++) {
-		n->syms[i] = malloc(strlen(e->syms[i]) + 1);
+		n->syms[i] = xmalloc(strlen(e->syms[i]) + 1);
 		strcpy(n->syms[i], e->syms[i]);
 		n->vals[i] = lval_copy(e->vals[i]);
 	}
@@ -1037,8 +1036,7 @@ static struct lval *builtin_load(struct lenv *e, struct lval *a)
 	struct lval *out;
 	if (a->count != 1) {
 		out = lerr_args_num(a, fname, 1);
-	}
-	else if (a->cell[0]->type != LVAL_CHARBUF) {
+	} else if (a->cell[0]->type != LVAL_CHARBUF) {
 		out = lerr_args_type(a, fname, LVAL_CHARBUF, a->type);
 	} else {
 		out = lenv_load(e, a->cell[0]->charbuf);
