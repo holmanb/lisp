@@ -11,7 +11,6 @@
 #include "lisp.h"
 #include "lerr.h"
 
-static char *lval_to_str(struct lenv *, struct lval *);
 static char *lval_expr_to_str(struct lenv *, struct lval *, char open,
 			      char close);
 static char *lenv_lookup_sym_by_val(struct lenv *e, struct lval *a);
@@ -31,6 +30,7 @@ static struct lval *lval_err(const char *fmt, ...);
 static struct lval *builtin_print(struct lenv *e, struct lval *a);
 static struct lval *builtin_error(struct lenv *e, struct lval *a);
 static struct lval *builtin_assert(struct lenv *, struct lval *);
+static struct lval *builtin_assert_err(struct lenv *e, struct lval *a);
 
 static struct lval *builtin_load(struct lenv *, struct lval *);
 
@@ -402,13 +402,13 @@ static char *lval_str_to_str(struct lval *v)
  * @param v: lval to convert
  * @return: char * representation of lval
  */
-static char *lval_to_str(struct lenv *e, struct lval *v)
+char *lval_to_str(struct lenv *e, struct lval *v)
 {
 	switch (v->type) {
 	case LVAL_NUM:
 		return String("%li", v->num);
 	case LVAL_ERR:
-		return String("\nErr: %s", v->err);
+		return String("Err: %s", v->err);
 	case LVAL_SYM:
 		return String("%s", v->sym);
 	case LVAL_SEXPR:
@@ -454,12 +454,6 @@ struct lval *lval_eval_sexpr(struct lenv *e, struct lval *v)
 		v->cell[i] = lval_eval(e, v->cell[i]);
 	}
 
-	/* error check */
-	for (i = 0; i < v->count; i++) {
-		if (v->cell[i]->type == LVAL_ERR)
-			return lval_take(v, i);
-	}
-
 	/* empty expressions */
 	if (v->count == 0)
 		return v;
@@ -473,7 +467,7 @@ struct lval *lval_eval_sexpr(struct lenv *e, struct lval *v)
 	if (f->type != LVAL_FUN) {
 		lval_free(f);
 		lval_free(v);
-		return lerr_args_type(f, fname, LVAL_FUN, f->type);
+		return lerr_args_type(e, f, fname, LVAL_FUN, f->type);
 	}
 
 	/* builtin */
@@ -586,7 +580,7 @@ static struct lval *lval_copy(struct lval *v)
 	default:
 		/* Leaks mem, but this should never happen */
 		x = xmalloc(sizeof(struct lval));
-		x = lval_err(String("Unknown lval type!%s", ltype_name(v->type)));
+		x = lval_err(String("Unknown lval type: %s", ltype_name(v->type)));
 		break;
 	}
 	return x;
@@ -763,6 +757,7 @@ static void lenv_add_builtins(struct lenv *e)
 
 	/* testing */
 	lenv_add_builtin(e, "assert", builtin_assert);
+	lenv_add_builtin(e, "assert_err", builtin_assert_err);
 }
 
 static struct lval *lenv_load(struct lenv *e, char *file)
@@ -776,7 +771,7 @@ static struct lval *lenv_load(struct lenv *e, char *file)
 		while (expr->count) {
 			struct lval *x = lval_eval(e, lval_pop(expr, 0));
 			if (x->type == LVAL_ERR) {
-				printf("\nLoad error in %s:%d\b", file, i);
+				printf("\nLoad error in %s:%d\n\n", file, i);
 				lval_println(e, x);
 			}
 			lval_free(x);
@@ -860,10 +855,8 @@ static struct lval *builtin_op(struct lenv *e, struct lval *a, char *fname,
 	int i;
 	for (i = 0; i < a->count; i++) {
 		if (a->cell[i]->type != LVAL_NUM) {
-			struct lval *out = lval_func_err(
-				a, fname,
-				"Cannot operate on non-number. Type %s",
-				ltype_name(a->cell[i]->type));
+			struct lval *out = lerr_args_type(e, a, fname, LVAL_NUM, a->cell[i]->type);
+
 			lval_free(a);
 			return out;
 		}
@@ -938,6 +931,31 @@ static struct lval *builtin_assert(struct lenv *e, struct lval *a)
 	return ret;
 }
 
+/* Evaluate and compare both arguments for equality.
+ * @param e: env
+ * @param a: lval containing err and substring match of the error message
+ */
+static struct lval *builtin_assert_err(struct lenv *e, struct lval *a)
+{
+	char fname[] = "assert_err";
+	struct lval *out;
+	if (a->count != 2)
+		out = lerr_args_num(a, fname, 2);
+	else if (a->cell[0]->type != LVAL_ERR)
+		out = lerr_args_type(e, a, fname, LVAL_ERR, a->type);
+	else if (a->cell[1]->type != LVAL_CHARBUF)
+		out = lerr_args_type(e, a, fname, LVAL_CHARBUF, a->type);
+	else if (!strstr(a->cell[0]->err, a->cell[1]->charbuf)) {
+		char *haystack = a->cell[0]->err;
+		char *needle = a->cell[1]->charbuf;
+		out = lval_err("assert failed \"%s\" does not contain \"%s\")", haystack, needle);
+	} else
+		out = lval_num(1);
+
+	lval_free(a);
+	return out;
+}
+
 static struct lval *builtin_type(struct lenv *e, struct lval *a)
 {
 	char fname[] = "type";
@@ -958,7 +976,7 @@ static struct lval *builtin_load(struct lenv *e, struct lval *a)
 	if (a->count != 1) {
 		out = lerr_args_num(a, fname, 1);
 	} else if (a->cell[0]->type != LVAL_CHARBUF) {
-		out = lerr_args_type(a, fname, LVAL_CHARBUF, a->type);
+		out = lerr_args_type(e, a, fname, LVAL_CHARBUF, a->type);
 	} else {
 		out = lenv_load(e, a->cell[0]->charbuf);
 	}
@@ -1056,9 +1074,9 @@ static struct lval *builtin_order(struct lenv *e, struct lval *a, char *op)
 	if (a->count != 2)
 		out = lerr_args_num(a, op, 2);
 	else if (a->cell[0]->type != LVAL_NUM)
-		out = lerr_args_type(a, op, LVAL_NUM, a->type);
+		out = lerr_args_type(e, a, op, LVAL_NUM, a->type);
 	else if (a->cell[1]->type != LVAL_NUM)
-		out = lerr_args_type(a, op, LVAL_NUM, a->type);
+		out = lerr_args_type(e, a, op, LVAL_NUM, a->type);
 	else {
 
 		int num1 = a->cell[0]->num;
@@ -1073,10 +1091,7 @@ static struct lval *builtin_order(struct lenv *e, struct lval *a, char *op)
 		} else if (strcmp("<=", op) == 0) {
 			ret = (num1 <= num2);
 		} else {
-			lval_free(a);
-			return lerr_arg_error(
-				a, op,
-				"comparison op is not a member of set(>, >=, <, <=)");
+			die("comparison op is not a member of set(>, >=, <, <=), received %s", op);
 		}
 		out = lval_num(ret);
 	}
@@ -1089,10 +1104,11 @@ static struct lval *builtin_logical(struct lenv *e, struct lval *a, char *op)
 	int i;
 	for (i = 0; i < a->count; i++) {
 		if (a->cell[i]->type != LVAL_NUM) {
-			struct lval *out = lval_func_err(
-				a, op, "Cannot operate on non-number. Type %s",
-				ltype_name(a->cell[i]->type));
+			char *val = lval_to_str(e, a->cell[i]);
+			struct lval *out = lerr_args_type(
+				e, a, op, LVAL_NUM, a->cell[i]->type);
 			lval_free(a);
+			free(val);
 			return out;
 		}
 	}
@@ -1129,9 +1145,7 @@ static struct lval *builtin_bitwise(struct lenv *e, struct lval *a, char *op)
 	int i;
 	for (i = 0; i < a->count; i++) {
 		if (a->cell[i]->type != LVAL_NUM) {
-			struct lval *out = lval_func_err(
-				a, op, "Cannot operate on non-number. Type %s",
-				ltype_name(a->cell[i]->type));
+			struct lval *out = lerr_args_type(e, a, op, LVAL_NUM, a->cell[i]->type);
 			lval_free(a);
 			return out;
 		}
@@ -1252,7 +1266,7 @@ static struct lval *builtin_head(struct lenv *e, struct lval *a)
 	if (a->count != 1)
 		out = lerr_args_too_many(a, fname, 1);
 	else if (a->cell[0]->type != LVAL_QEXPR)
-		out = lerr_args_type(a, fname, LVAL_QEXPR, a->cell[0]->type);
+		out = lerr_args_type(e, a, fname, LVAL_QEXPR, a->cell[0]->type);
 	else if (a->cell[0]->count == 0)
 		out = lval_func_err(a, fname, "passed {}");
 	else {
@@ -1273,7 +1287,7 @@ static struct lval *builtin_tail(struct lenv *e, struct lval *a)
 	if (a->count != 1)
 		out = lerr_args_too_many(a, fname, 1);
 	else if (a->cell[0]->type != LVAL_QEXPR)
-		out = lerr_args_type(a, fname, LVAL_QEXPR, a->cell[0]->type);
+		out = lerr_args_type(e, a, fname, LVAL_QEXPR, a->cell[0]->type);
 	else if (a->cell[0]->count == 0)
 		out = lval_func_err(a, fname, "passed {}");
 	else {
@@ -1299,7 +1313,7 @@ static struct lval *builtin_eval(struct lenv *e, struct lval *a)
 	if (a->count != 1)
 		out = lerr_args_too_many(a, fname, 1);
 	else if (a->cell[0]->type != LVAL_QEXPR)
-		out = lerr_args_type(a, fname, a->cell[0]->type, LVAL_QEXPR);
+		out = lerr_args_type(e, a, fname, LVAL_QEXPR, a->cell[0]->type);
 	else {
 		/* a freed in lval_take */
 		out = lval_take(a, 0);
@@ -1316,16 +1330,16 @@ static struct lval *builtin_eval(struct lenv *e, struct lval *a)
  */
 static struct lval *builtin_if(struct lenv *e, struct lval *a)
 {
-	const char fname[] = "eval";
+	const char fname[] = "if";
 	struct lval *out;
 	if (a->count != 3)
 		out = lerr_args_num(a, fname, 3);
 	else if (a->cell[0]->type != LVAL_NUM)
-		out = lerr_args_type(a, fname, LVAL_NUM, a->cell[0]->type);
+		out = lerr_args_type(e, a, fname, LVAL_NUM, a->cell[0]->type);
 	else if (a->cell[1]->type != LVAL_QEXPR)
-		out = lerr_args_type(a, fname, LVAL_QEXPR, a->cell[1]->type);
+		out = lerr_args_type(e, a, fname, LVAL_QEXPR, a->cell[1]->type);
 	else if (a->cell[2]->type != LVAL_QEXPR)
-		out = lerr_args_type(a, fname, LVAL_QEXPR, a->cell[2]->type);
+		out = lerr_args_type(e, a, fname, LVAL_QEXPR, a->cell[2]->type);
 	else {
 		a->cell[1]->type = LVAL_SEXPR;
 		a->cell[2]->type = LVAL_SEXPR;
@@ -1380,7 +1394,7 @@ struct lval *builtin_join(struct lenv *e, struct lval *a)
 			out = lval_func_err(
 				a, fname,
 				"Function %s: expected argument types in set(%s, %s), received: %s",
-				fname, ltype_name(LVAL_QEXPR), ltype_name(LVAL_QEXPR),
+				fname, ltype_name(LVAL_QEXPR), ltype_name(LVAL_CHARBUF),
 				ltype_name(a->cell[0]->type));
 		}
 	}
@@ -1397,18 +1411,18 @@ struct lval *builtin_join(struct lenv *e, struct lval *a)
  * @param fname: to insert in returned error
  * @return: NULL if check passes, else LVAL_ERR
  */
-static struct lval *lerr_verify_first_arg_is_qexpr_of_symbols(struct lval *a,
+static struct lval *lerr_verify_first_arg_is_qexpr_of_symbols(struct lenv *e, struct lval *a,
 							      const char *fname)
 {
 	int i;
 	/* first arg is symbol list */
 	struct lval *syms = a->cell[0];
 	if (a->cell[0]->type != LVAL_QEXPR)
-		return lerr_args_type(a, fname, LVAL_QEXPR, a->cell[0]->type);
+		return lerr_args_type(e, a, fname, LVAL_QEXPR, a->cell[0]->type);
 
 	for (i = 0; i < syms->count; i++)
 		if (syms->cell[i]->type != LVAL_SYM)
-			return lerr_args_type(a, fname, LVAL_SYM,
+			return lerr_args_type(e, a, fname, LVAL_SYM,
 					      syms->cell[i]->type);
 	return NULL;
 }
@@ -1417,7 +1431,7 @@ static struct lval *lerr_verify_first_arg_is_qexpr_of_symbols(struct lval *a,
 static struct lval *builtin_var(struct lenv *e, struct lval *a, char *fname)
 {
 	int i;
-	struct lval *err = lerr_verify_first_arg_is_qexpr_of_symbols(a, fname);
+	struct lval *err = lerr_verify_first_arg_is_qexpr_of_symbols(e, a, fname);
 	if (err != NULL) {
 		lval_free(a);
 		return err;
@@ -1459,9 +1473,9 @@ static struct lval *builtin_lambda(struct lenv *e, struct lval *a)
 	if (a->count != 2)
 		out = lerr_args_num(a, fname, 2);
 	else if (arg2_type != LVAL_QEXPR)
-		out = lerr_args_type(a, fname, LVAL_QEXPR, arg2_type);
+		out = lerr_args_type(e, a, fname, LVAL_QEXPR, arg2_type);
 	else
-		out = lerr_verify_first_arg_is_qexpr_of_symbols(a, fname);
+		out = lerr_verify_first_arg_is_qexpr_of_symbols(e, a, fname);
 	if (!out) {
 		/* pop first two args and pass them to lval_lambda */
 		struct lval *formals = lval_pop(a, 0);
@@ -1498,7 +1512,6 @@ char *ltype_name(int t)
 int main(int argc, char *argv[])
 {
 	int i;
-	puts(version);
 
 	/* Create Some Parsers */
 	Number = mpc_new("number");
@@ -1524,8 +1537,11 @@ int main(int argc, char *argv[])
 		lisp    : /^/ <expr>* /$/ ;                         \
 		",
 		  Number, Charbuf, Comment, Symbol, Sexpr, Qexpr, Expr, Lisp);
+	struct lval *v= lval_str(version);
 	struct lenv *e = lenv_new();
 	lenv_add_builtins(e);
+	lval_println(e, v);
+	lval_free(v);
 
 	if (argc >= 2) {
 		/* execute file(s) */

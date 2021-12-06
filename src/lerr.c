@@ -78,12 +78,12 @@ struct lval *lerr_args_too_few_variable(struct lval *a, const char *fname,
 			" %d or more arguments", min);
 }
 
-struct lval *lerr_args_type(struct lval *a, const char *fname,
+struct lval *lerr_args_type(struct lenv *e, struct lval *a, const char *fname,
 				   int expected, int received)
 {
 	return lval_func_err(a, fname,
-			     "passed incorrect type. Got %s, expected %s",
-			     ltype_name(received), ltype_name(expected));
+			     "passed incorrect type. Expected %s, received:\n%s%s",
+			     ltype_name(expected), ltype_name(received), lval_to_str(e, a));
 }
 
 struct lval *lerr_args_mult_type(struct lval *a, const char *fname,
@@ -93,9 +93,4 @@ struct lval *lerr_args_mult_type(struct lval *a, const char *fname,
 		a, fname,
 		"passed multiple types. Expected one type but receive %s and %s",
 		ltype_name(type1), ltype_name(type2));
-}
-
-struct lval *lerr_arg_error(struct lval *a, const char *fname, char *msg)
-{
-	return lval_func_err(a, fname, msg);
 }

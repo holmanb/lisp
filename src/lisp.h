@@ -81,5 +81,6 @@ struct lenv {
 
 char *String(char *s, ...);
 char *ltype_name(int t);
+char *lval_to_str(struct lenv *, struct lval *);
 
 #endif
