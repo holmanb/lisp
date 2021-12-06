@@ -3,5 +3,12 @@
 (assert (map - {5 6 77 -1}) {-5 -6 -77 1})
 (assert (sum {1 2 4 8 16}) 31)
 (assert (product {2 4}) 8)
-
-
+(assert (len {1 2 3 4 5}) 5)
+(assert ((unpack *) {5 5}) 25)
+(assert ((pack len) 1 2 3 4 5) 5)
+(lassert 1)
+(lassert 1 1)
+(lassert 1 1 1)
+(lassert 1 1)
+;(lassert (last {1 2}))
+;(lassert (nth 1 {0 1 0}))

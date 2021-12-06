@@ -44,18 +44,18 @@
      	{+ 1 (len (tail l))}
 })
 
+; First item in list
+(fun {first l} {eval (head l)})
+
 ; Nth item in List
 (fun {nth n l} {
      if (== n 0)
-	{eval (head l)}
+	{first l}
 	{nth (- n 1) tail l}
 })
 
 ; Last item in list
 (fun {last l} {nth (- (len l) 1) l})
-
-; First item in list
-(fun {first l} {nth 0 l})
 
 ; Take first N items
 (fun {take n l} {
@@ -100,13 +100,50 @@
 ; Sum
 (fun {sum l} {foldl + 0 l})
 (fun {product l} {foldl * 1 l})
+(fun {and l} {foldl && true l})
+(fun {or l} {foldl || (head l) l})
+(fun {equal l} {foldl == (head l) l})
 
 ; Select
 (fun {select & cs} {
      if (== cs nil)
-     	{error "No selection found!"}
+     	{error "No selection found"}
 	{if (first (first cs)) {nth 2 (first cs)} {unpack select (tail cs)}}
 })
 
 ; Default Case
 (def {otherwise} true)
+
+; Print suffix of day of month
+(fun {month-day-suffix i} {
+     select
+	{(== i 0) "st"}
+	{(== i 1) "nd"}
+	{(== i 3) "rd"}
+	{otherwise "th"}
+     })
+
+; assert
+; ensure all args are true
+(fun {lassert & cl} {
+	if (and cl)
+	{nil}
+	{error "lassert failed: " cl}
+     })
+
+; TODO:
+; assert_eq
+; ensure all args are equal
+;
+; assert_ne
+; ensure all args are not equal
+;
+; assert_$TYPE
+; ensure all args are of type $TYPE
+; DOES NOT WORK
+(fun {lassert_eq & cl} {
+	if (equal cl)
+	{print cl}
+	{error "lassert_eq failed: " cl}
+     })
+

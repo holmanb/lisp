@@ -1,0 +1,28 @@
+Dependencies:
+-------------
+- libeditreadline-dev
+- mpc (included as git submodule, first time setup is required)
+
+Build:
+------
+
+```
+$ git clone --recursive git@github.com:holmanb/lisp.git
+$ cd mpc; sudo make install
+$ make
+$ ./lisp
+Lisp Version 0.0.0.0.1
+Press Ctrl+c to Exit
+
+lisp> print "hello world"
+hello world
+()
+```
+
+Optional:
+---------
+- clang-format
+- llvm-profdata
+- valgrind
+
+This experimental Lisp started with Daniel Holden's "Build your own Lisp" tutorial.

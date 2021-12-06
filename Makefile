@@ -13,6 +13,7 @@ CLANG_FORMAT = clang-format-11
 TEST = ./$(BIN) $(LSP_LIB) $(LSP_TEST)
 PROFRAW = tests.profraw
 PROFDATA = tests.profdata
+COVERAGE = llvm-cov report $(TEST) -instr-profile=$(PROFDATA) $(CODE)
 
 .PHONY: all
 all: build tags
@@ -66,17 +67,25 @@ test-valgrind-dbg: all
 		--vgdb-error=0                         \
 		$(TEST)
 
-.PHONY:coverage
-coverage: $(CODE)
-	clang \
-		-fprofile-instr-generate \
-		-fcoverage-mapping \
-		-Wno-gnu-zero-variadic-macro-arguments \
+.PHONY:run-coverage
+run-coverage: $(CODE)
+	clang                                                         \
+		-fprofile-instr-generate                              \
+		-fcoverage-mapping                                    \
+		-Wno-gnu-zero-variadic-macro-arguments                \
 		$(CFLAGS) $(SRC) $(LDFLAGS) -o $(BIN)
+
 	LLVM_PROFILE_FILE="$(PROFRAW)" $(TEST)
 	llvm-profdata merge -sparse $(PROFRAW) -o $(PROFDATA)
 	llvm-cov show $(TEST) -instr-profile=$(PROFDATA)
-	llvm-cov report $(TEST) -instr-profile=$(PROFDATA) --show-functions $(CODE)
+
+.PHONY:coverage
+coverage: $(CODE) run-coverage
+	$(COVERAGE)
+
+.PHONY:coverage-function-summary
+coverage-function-summary: $(CODE) run-coverage
+	$(COVERAGE) --show-functions
 
 .PHONY: test
 test: all
