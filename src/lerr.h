@@ -11,6 +11,8 @@ struct lval *lerr_args_too_few_variable(struct lval *, const char *fname,
 					int min);
 struct lval *lerr_args_type(struct lenv *, struct lval *, const char *fname,
 			    int expected, int received);
+struct lval *lerr_args_type_str(struct lenv *e, struct lval *a, const char *fname,
+			    char *expected, int received);
 struct lval *lerr_args_mult_type(struct lval *, const char *fname, int expected,
 				 int received);
 #endif

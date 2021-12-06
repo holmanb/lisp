@@ -50,9 +50,8 @@
 ; Nth item in List
 (fun {nth n l} {
      if (== n 0)
-	{first l}
-	{nth (- n 1) tail l}
-})
+        {first l}
+        {nth (- n 1) (tail l)}})
 
 ; Last item in list
 (fun {last l} {nth (- (len l) 1) l})
@@ -127,7 +126,7 @@
 ; ensure all args are true
 (fun {lassert & cl} {
 	if (and cl)
-	{nil}
+	{true}
 	{error "lassert failed: " cl}
      })
 

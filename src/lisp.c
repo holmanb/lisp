@@ -465,9 +465,10 @@ struct lval *lval_eval_sexpr(struct lenv *e, struct lval *v)
 	/* ensure first elem is func */
 	struct lval *f = lval_pop(v, 0);
 	if (f->type != LVAL_FUN) {
+		struct lval *out = lerr_args_type(e, f, fname, LVAL_FUN, f->type);
 		lval_free(f);
 		lval_free(v);
-		return lerr_args_type(e, f, fname, LVAL_FUN, f->type);
+		return out;
 	}
 
 	/* builtin */
@@ -1376,13 +1377,8 @@ struct lval *builtin_join(struct lenv *e, struct lval *a)
 				break;
 			}
 		} else {
-			out = lval_func_err(
-				a, fname,
-				"Function %s: expected argument types in set(%s, %s), received: %s",
-				fname, ltype_name(LVAL_QEXPR),
-				ltype_name(LVAL_QEXPR),
-				ltype_name(a->cell[i]->type));
-			break;
+			out = lerr_args_type_str(e, a, fname, "Q-Expression or Charbuf", a->cell[i]->type);
+				break;
 		}
 	}
 	if (!out) {
