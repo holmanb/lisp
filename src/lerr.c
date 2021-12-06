@@ -3,7 +3,6 @@
 #include "lisp.h"
 #include "lerr.h"
 
-
 static char *fmt(const char *fmt, ...)
 {
 	const int size = 512;
@@ -35,8 +34,7 @@ struct lval *lval_func_err(struct lval *a, const char *fname,
 	return v;
 }
 
-struct lval *lerr_args_num(struct lval *a, const char *fname,
-				  int expected)
+struct lval *lerr_args_num(struct lval *a, const char *fname, int expected)
 {
 	if (expected > a->count)
 		return lerr_args_too_few(a, fname, expected);
@@ -44,50 +42,55 @@ struct lval *lerr_args_num(struct lval *a, const char *fname,
 		return lerr_args_too_many(a, fname, expected);
 }
 
-struct lval *lerr_args_num_desc(struct lval *a, const char *fname,
-				       char *desc, int expected, int received)
+struct lval *lerr_args_num_desc(struct lval *a, const char *fname, char *desc,
+				int expected, int received)
 {
 	return lval_func_err(a, fname,
 			     "passed %s arguments. Got %d, expected %d", desc,
 			     received, expected);
 }
 
-struct lval *lerr_args_too_many(struct lval *a, const char *fname,
-				       int expected)
+struct lval *lerr_args_too_many(struct lval *a, const char *fname, int expected)
 {
 	return lerr_args_num_desc(a, fname, "too many", expected, a->count);
 }
 
 struct lval *lerr_args_too_many_variable(struct lval *a, const char *fname,
-				       int max)
+					 int max)
 {
-	return lval_func_err(a, fname, "passed too many arguments. Expected"
-			" no more than %d arguments", max);
+	return lval_func_err(a, fname,
+			     "passed too many arguments. Expected"
+			     " no more than %d arguments",
+			     max);
 }
 
-struct lval *lerr_args_too_few(struct lval *a, const char *fname,
-				      int expected)
+struct lval *lerr_args_too_few(struct lval *a, const char *fname, int expected)
 {
 	return lerr_args_num_desc(a, fname, "too few", expected, a->count);
 }
 
 struct lval *lerr_args_too_few_variable(struct lval *a, const char *fname,
-				      int min)
+					int min)
 {
-	return lval_func_err(a, fname, "passed too few arguments. Expected"
-			" %d or more arguments", min);
+	return lval_func_err(a, fname,
+			     "passed too few arguments. Expected"
+			     " %d or more arguments",
+			     min);
 }
 
 struct lval *lerr_args_type(struct lenv *e, struct lval *a, const char *fname,
-				   int expected, int received)
+			    int expected, int received)
 {
-	return lval_func_err(a, fname,
-			     "passed incorrect type. Expected %s, received:\n%s%s",
-			     ltype_name(expected), ltype_name(received), lval_to_str(e, a));
+	char *val = lval_to_str(e, a);
+	struct lval *err = lval_func_err(
+		a, fname, "passed incorrect type. Expected %s, received:\n%s%s",
+		ltype_name(expected), ltype_name(received), val);
+	free(val);
+	return err;
 }
 
-struct lval *lerr_args_mult_type(struct lval *a, const char *fname,
-					int type1, int type2)
+struct lval *lerr_args_mult_type(struct lval *a, const char *fname, int type1,
+				 int type2)
 {
 	return lval_func_err(
 		a, fname,

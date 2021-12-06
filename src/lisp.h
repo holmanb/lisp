@@ -39,7 +39,6 @@ enum {
 	LERR_BAD_NUM,
 };
 
-
 /* current min size is int + 4 pointers (function lval)
  * which gives us a size of 4 + 8(4) = 36 Bytes on 64b
  * and 4 + 4(4) = 20 Bytest on 32b
@@ -48,7 +47,6 @@ struct lval {
 	int type;
 
 	union {
-
 		/* basic */
 		char *sym;
 		char *charbuf;
@@ -78,9 +76,9 @@ struct lenv {
 	int count;
 };
 
-
 char *String(char *s, ...);
 char *ltype_name(int t);
 char *lval_to_str(struct lenv *, struct lval *);
+void lval_free(struct lval *);
 
 #endif
