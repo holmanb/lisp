@@ -2,3 +2,4 @@ tags
 *.o
 lisp
 tests.prof*
+default.prof*

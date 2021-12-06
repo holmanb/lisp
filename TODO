@@ -1,0 +1,18 @@
+Implement:
+- counters (per function counters, initially)
+- syscalls & ioctls
+- casting (between all types)
+- tab completion readline support (https://web.mit.edu/gnu/doc/html/rlman_2.html)
+- improve cli (-v/-h/-c)
+- recursive imports
+- benchmarks
+- pool allocation
+- tail call optimization
+- static typing?
+- buddy allocator??? (for variable size data types)
+- introspection/debugging (breakpoint, view lenv members)
+- improve stack traces
+
+Fix:
+- debug variables in library loading?
+- memory leak

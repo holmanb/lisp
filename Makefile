@@ -35,7 +35,7 @@ tags: $(CODE)
 
 .PHONY: clean
 clean:
-	@rm $(OBJ) $(BIN) tags $(PROFRAW) $(PROFDATA)
+	@rm $(OBJ) $(BIN) tags $(PROFRAW) $(PROFDATA) default.profraw
 
 .PHONY: clean-lib
 clean-lib:
