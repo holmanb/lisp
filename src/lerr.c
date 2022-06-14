@@ -83,18 +83,20 @@ struct lval *lerr_args_type(struct lenv *e, struct lval *a, const char *fname,
 {
 	char *val = lval_to_str(e, a);
 	struct lval *err = lval_func_err(
-		a, fname, "passed incorrect type. Expected %s, received:\n%s:%s",
+		a, fname,
+		"passed incorrect type. Expected %s, received:\n%s:%s",
 		ltype_name(expected), ltype_name(received), val);
 	free(val);
 	return err;
 }
 
-struct lval *lerr_args_type_str(struct lenv *e, struct lval *a, const char *fname,
-			    char *expected, int received)
+struct lval *lerr_args_type_str(struct lenv *e, struct lval *a,
+				const char *fname, char *expected, int received)
 {
 	char *val = lval_to_str(e, a);
 	struct lval *err = lval_func_err(
-		a, fname, "passed incorrect type. Expected %s, received:\n%s:%s",
+		a, fname,
+		"passed incorrect type. Expected %s, received:\n%s:%s",
 		expected, ltype_name(received), val);
 	free(val);
 	return err;

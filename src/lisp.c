@@ -6,8 +6,8 @@
 
 #include <editline/readline.h>
 #include <editline/history.h>
-#include <mpc.h>
 
+#include "../mpc/mpc.h"
 #include "lisp.h"
 #include "lerr.h"
 
@@ -465,7 +465,8 @@ struct lval *lval_eval_sexpr(struct lenv *e, struct lval *v)
 	/* ensure first elem is func */
 	struct lval *f = lval_pop(v, 0);
 	if (f->type != LVAL_FUN) {
-		struct lval *out = lerr_args_type(e, f, fname, LVAL_FUN, f->type);
+		struct lval *out =
+			lerr_args_type(e, f, fname, LVAL_FUN, f->type);
 		lval_free(f);
 		lval_free(v);
 		return out;
@@ -1377,8 +1378,10 @@ struct lval *builtin_join(struct lenv *e, struct lval *a)
 				break;
 			}
 		} else {
-			out = lerr_args_type_str(e, a, fname, "Q-Expression or Charbuf", a->cell[i]->type);
-				break;
+			out = lerr_args_type_str(e, a, fname,
+						 "Q-Expression or Charbuf",
+						 a->cell[i]->type);
+			break;
 		}
 	}
 	if (!out) {

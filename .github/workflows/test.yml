@@ -1,0 +1,26 @@
+name: ci_lisp
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v2.0.0
+
+      - name: Checkout project
+        run: git submodule update --init --recursive
+
+      - name: Dependencies
+        run: |
+          sudo apt-get -v update
+          sudo apt-get install gcc valgrind make libeditreadline-dev
+      - name: Build submodule
+        run: make lib
+
+      - name: Build & Test
+        run: |
+          make test

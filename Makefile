@@ -1,5 +1,5 @@
-CFLAGS += -g -std=c99 -Wall -I/usr/local/share/mpc
-LDFLAGS += -ledit -lmpc -L/usr/local/lib/
+CFLAGS += -g -std=c99 -Wall -I$(shell pwd)/mpc/build
+LDFLAGS += -ledit -lmpc -L$(shell pwd)/mpc
 SRCDIR += src
 TESTDIR += lsp
 SRC := $(shell find $(SRCDIR) -name '*.c')
@@ -21,7 +21,6 @@ all: build tags
 .PHONY: lib
 lib:
 	make -C mpc build/libmpc.so
-	sudo make -C install
 
 build: $(CODE)
 	$(CC) $(CFLAGS) $(SRC) $(LDFLAGS) -o $(BIN)
@@ -88,5 +87,5 @@ coverage-function-summary: $(CODE) run-coverage
 	$(COVERAGE) --show-functions
 
 .PHONY: test
-test: all
+test: build
 	$(TEST)
