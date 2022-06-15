@@ -26,6 +26,7 @@ static struct lval *lval_pop(struct lval *, int i);
 static struct lval *lval_call(struct lenv *, struct lval *, struct lval *);
 static struct lval *lval_str(char *s);
 static struct lval *lval_err(const char *fmt, ...);
+static void lval_println(struct lenv *e, struct lval *v);
 
 static struct lval *builtin_print(struct lenv *e, struct lval *a);
 static struct lval *builtin_error(struct lenv *e, struct lval *a);
@@ -93,6 +94,27 @@ static mpc_parser_t *Qexpr;
 static mpc_parser_t *Sexpr;
 static mpc_parser_t *Expr;
 static mpc_parser_t *Lisp;
+
+#ifdef __clang__
+#define dump(arg) __builtin_dump_struct(arg, &printf);
+#else
+#define dump(arg) 0;
+#endif
+
+void print_trace()
+{
+	void *array[100];
+	int size, i;
+
+	size = backtrace(array, 100);
+	char **strings = backtrace_symbols(array, size);
+	if (strings) {
+		printf("Obtained %d stack frames.\n", size);
+		for (i = 0; i < size; i++)
+			printf("%s\n", strings[i]);
+	}
+	free(strings);
+}
 
 /* lval constructors */
 static struct lval *lval_num(long x)
@@ -548,6 +570,7 @@ static struct lval *lval_copy(struct lval *v)
 		x->type = v->type;
 		x->builtin = v->builtin;
 		break;
+
 	case LVAL_NUM:
 		x = lval_num(v->num);
 		break;
@@ -565,7 +588,7 @@ static struct lval *lval_copy(struct lval *v)
 
 	/* copy lists */
 	case LVAL_SEXPR: /*fallthrough*/
-	case LVAL_QEXPR:
+	case LVAL_QEXPR: {
 		x = xmalloc(sizeof(struct lval));
 		x->type = v->type;
 		x->count = v->count;
@@ -576,12 +599,14 @@ static struct lval *lval_copy(struct lval *v)
 		for (i = 0; i < x->count; i++)
 			x->cell[i] = lval_copy(v->cell[i]);
 		break;
-	default:
+	}
+	default: {
 		/* Leaks mem, but this should never happen */
 		x = xmalloc(sizeof(struct lval));
 		x = lval_err(
 			String("Unknown lval type: %s", ltype_name(v->type)));
 		break;
+	}
 	}
 	return x;
 }
