@@ -1,5 +1,7 @@
 ; Equality
+def {x} 1
 (assert 1 1)
+(assert x x)
 (assert () ())
 (assert {} {})
 (assert "test" "test")

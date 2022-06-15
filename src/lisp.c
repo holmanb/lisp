@@ -1513,6 +1513,8 @@ char *ltype_name(int t)
 	switch (t) {
 	case LVAL_FUN:
 		return "Function";
+	case LVAL_FUN_BUILTIN:
+		return "Builtin";
 	case LVAL_NUM:
 		return "Number";
 	case LVAL_ERR:
@@ -1522,9 +1524,9 @@ char *ltype_name(int t)
 	case LVAL_CHARBUF:
 		return "Charbuf";
 	case LVAL_SEXPR:
-		return "S-Expression";
+		return "S-expression";
 	case LVAL_QEXPR:
-		return "Q-Expression";
+		return "Q-expression";
 	default: /* leak, but this should never happen */
 		return String("Unknown: %d", t);
 	}

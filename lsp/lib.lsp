@@ -122,27 +122,9 @@
 	{otherwise "th"}
      })
 
-; assert
 ; ensure all args are true
 (fun {lassert & cl} {
 	if (and cl)
 	{true}
 	{error "lassert failed: " cl}
      })
-
-; TODO:
-; assert_eq
-; ensure all args are equal
-;
-; assert_ne
-; ensure all args are not equal
-;
-; assert_$TYPE
-; ensure all args are of type $TYPE
-; DOES NOT WORK
-(fun {lassert_eq & cl} {
-	if (equal cl)
-	{print cl}
-	{error "lassert_eq failed: " cl}
-     })
-
