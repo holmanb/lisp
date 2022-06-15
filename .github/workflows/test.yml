@@ -17,10 +17,13 @@ jobs:
       - name: Dependencies
         run: |
           sudo apt-get -v update
-          sudo apt-get install gcc valgrind make libeditreadline-dev
+          sudo apt-get install gcc valgrind make libeditreadline-dev clang
+
       - name: Build submodule
         run: make lib
 
       - name: Build & Test
         run: |
-          make test
+          find -name '*.so'
+          pwd
+          LD_LIBRARY_PATH=$(pwd)/mpc make test
