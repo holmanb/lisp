@@ -105,7 +105,7 @@ static struct lval *lval_num(long x)
 
 static struct lval *lval_call(struct lenv *e, struct lval *f, struct lval *a)
 {
-	if (f->builtin)
+	if (f->type == LVAL_FUN_BUILTIN)
 		return f->builtin(e, a);
 	const char *fname = lenv_lookup_sym_by_val(e, f);
 
@@ -237,7 +237,7 @@ static struct lval *lval_qexpr(void)
 static struct lval *lval_builtin(lbuiltin func)
 {
 	struct lval *v = xmalloc(sizeof(struct lval));
-	v->type = LVAL_FUN;
+	v->type = LVAL_FUN_BUILTIN;
 	v->builtin = func;
 	return v;
 }
@@ -246,7 +246,6 @@ static struct lval *lval_lambda(struct lval *formals, struct lval *body)
 {
 	struct lval *v = xmalloc(sizeof(struct lval));
 	v->type = LVAL_FUN;
-	v->builtin = NULL;
 
 	v->env = lenv_new();
 	v->formals = formals;
@@ -274,11 +273,11 @@ void lval_free(struct lval *v)
 		free(v->cell);
 		break;
 	case LVAL_FUN:
-		if (!v->builtin) {
-			lenv_free(v->env);
-			lval_free(v->formals);
-			lval_free(v->body);
-		}
+		lenv_free(v->env);
+		lval_free(v->formals);
+		lval_free(v->body);
+		break;
+	case LVAL_FUN_BUILTIN:
 		break;
 	case LVAL_NUM:
 		break;
@@ -418,23 +417,21 @@ char *lval_to_str(struct lenv *e, struct lval *v)
 		return lval_str_to_str(v);
 	case LVAL_QEXPR:
 		return lval_expr_to_str(e, v, '{', '}');
-	case LVAL_FUN:
-		if (v->builtin)
-			return String("<builtin function '%s'>",
-				      lenv_lookup_sym_by_val(e, v));
-		else {
-			char *formals = lval_to_str(e, v->formals);
-			char *body = lval_to_str(e, v->body);
-			char *out = String("%s %s %s)",
-					   lenv_lookup_sym_by_val(e, v),
-					   formals, body);
-			free(formals);
-			free(body);
-			return out;
-		}
-		break;
+	case LVAL_FUN: {
+		char *formals = lval_to_str(e, v->formals);
+		char *body = lval_to_str(e, v->body);
+		char *out = String("%s %s %s", lenv_lookup_sym_by_val(e, v),
+				   formals, body);
+		free(formals);
+		free(body);
+		return out;
 	}
-	return String("Unknown lval type!");
+	case LVAL_FUN_BUILTIN:
+		return String("<builtin function '%s'>",
+			      lenv_lookup_sym_by_val(e, v));
+	default:
+		return String("Unknown lval type!");
+	}
 }
 
 static void lval_println(struct lenv *e, struct lval *v)
@@ -464,7 +461,7 @@ struct lval *lval_eval_sexpr(struct lenv *e, struct lval *v)
 
 	/* ensure first elem is func */
 	struct lval *f = lval_pop(v, 0);
-	if (f->type != LVAL_FUN) {
+	if (f->type != LVAL_FUN && f->type != LVAL_FUN_BUILTIN) {
 		struct lval *out =
 			lerr_args_type(e, f, fname, LVAL_FUN, f->type);
 		lval_free(f);
@@ -472,7 +469,6 @@ struct lval *lval_eval_sexpr(struct lenv *e, struct lval *v)
 		return out;
 	}
 
-	/* builtin */
 	struct lval *result = lval_call(e, f, v);
 	lval_free(f);
 	return result;
@@ -543,14 +539,14 @@ static struct lval *lval_copy(struct lval *v)
 	case LVAL_FUN:
 		x = xmalloc(sizeof(struct lval));
 		x->type = v->type;
-		if (v->builtin)
-			x->builtin = v->builtin;
-		else {
-			x->builtin = NULL;
-			x->env = lenv_copy(v->env);
-			x->formals = lval_copy(v->formals);
-			x->body = lval_copy(v->body);
-		}
+		x->env = lenv_copy(v->env);
+		x->formals = lval_copy(v->formals);
+		x->body = lval_copy(v->body);
+		break;
+	case LVAL_FUN_BUILTIN:
+		x = xmalloc(sizeof(struct lval));
+		x->type = v->type;
+		x->builtin = v->builtin;
 		break;
 	case LVAL_NUM:
 		x = lval_num(v->num);

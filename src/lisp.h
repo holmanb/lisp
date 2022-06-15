@@ -37,6 +37,7 @@ enum {
 	LVAL_SYM,
 	LVAL_CHARBUF,
 	LVAL_FUN,
+	LVAL_FUN_BUILTIN,
 	LVAL_SEXPR,
 	LVAL_QEXPR,
 };
@@ -61,9 +62,11 @@ struct lval {
 		char *err;
 		long num;
 
+		/* Builtin Function */
+		lbuiltin builtin;
+
 		/* Function */
 		struct {
-			lbuiltin builtin;
 			struct lenv *env;
 			struct lval *formals;
 			struct lval *body;
