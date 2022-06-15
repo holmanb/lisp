@@ -3,13 +3,16 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <execinfo.h>
+
+#define warn(fmt, ...) fprintf(stderr, "WARN: " #fmt, __VA_ARGS__);
+#define err(fmt, ...) fprintf(stderr, "ERR:" #fmt, __VA_ARGS__);
 
 #define die(fmt, ...)                                                          \
-	{                                                                      \
-		fprintf(stderr, fmt, __VA_ARGS__);                             \
+	({                                                                     \
+		err(fmt, __VA_ARGS__);                                         \
 		exit(EXIT_FAILURE);                                            \
-	}                                                                      \
-	while (0)
+	})
 
 #define xmalloc(size)                                                          \
 	({                                                                     \
@@ -57,10 +60,10 @@ struct lval {
 
 	union {
 		/* basic */
+		long num;
 		char *sym;
 		char *charbuf;
 		char *err;
-		long num;
 
 		/* Builtin Function */
 		lbuiltin builtin;
@@ -74,8 +77,8 @@ struct lval {
 
 		/* Expression */
 		struct {
-			struct lval **cell;
 			int count;
+			struct lval **cell;
 		};
 	};
 };

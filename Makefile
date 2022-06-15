@@ -1,5 +1,5 @@
 CFLAGS += -g -std=c99 -Wall -I$(shell pwd)/mpc/build
-LDFLAGS += -ledit -lmpc -L$(shell pwd)/mpc
+LDFLAGS += -ledit -lmpc -rdynamic -L$(shell pwd)/mpc
 SRCDIR += src
 TESTDIR += lsp
 SRC := $(shell find $(SRCDIR) -name '*.c')
@@ -16,14 +16,20 @@ PROFDATA = tests.profdata
 COVERAGE = llvm-cov report $(TEST) -instr-profile=$(PROFDATA) $(CODE)
 
 .PHONY: all
-all: build tags
+all: build-clang tags
 
 .PHONY: lib
 lib:
-	make -C mpc build/libmpc.so
+	CC=clang make -C mpc build/libmpc.so
 
 build: $(CODE)
 	$(CC) $(CFLAGS) $(SRC) $(LDFLAGS) -o $(BIN)
+
+build-gcc: $(CODE)
+	gcc $(CFLAGS) $(SRC) $(LDFLAGS) -o $(BIN)
+
+build-clang: $(CODE)
+	clang $(CFLAGS) $(SRC) $(LDFLAGS) -o $(BIN)
 
 .PHONY: fmt
 fmt:
@@ -44,10 +50,23 @@ clean-lib:
 clean-all: clean clean-lib
 
 
-.PHONY: test-valgrind
+.PHONY: test-asan
 test-asan: all
-	clang $(CFLAGS) -fsanitize=address $(SRC) $(LDFLAGS) -o $(BIN)
+	clang -O1 $(CFLAGS) \
+		-fsanitize=address \
+		-fno-omit-frame-pointer \
+		-fno-optimize-sibling-calls \
+		$(SRC) $(LDFLAGS) -o $(BIN)
 	$(TEST)
+
+.PHONY: test-leak
+test-leak: all
+	clang -O1 $(CFLAGS) \
+		-fsanitize=leak \
+		-fno-omit-frame-pointer \
+		-fno-optimize-sibling-calls \
+		$(SRC) $(LDFLAGS) -o $(BIN)
+	ASAN_OPTIONS=detect_leaks=1 $(TEST)
 
 
 .PHONY: test-valgrind
@@ -87,5 +106,5 @@ coverage-function-summary: $(CODE) run-coverage
 	$(COVERAGE) --show-functions
 
 .PHONY: test
-test: build
+test: build-clang
 	$(TEST)
