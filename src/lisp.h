@@ -19,6 +19,14 @@
 		_ret;                                                          \
 	})
 
+#define xcalloc(size)                                                          \
+	({                                                                     \
+		void *_ret = calloc(1, size);                                  \
+		if (!_ret)                                                     \
+			die("%s", "failed to allocate memory\n");              \
+		_ret;                                                          \
+	})
+
 struct lenv;
 struct lval;
 typedef struct lval *(*lbuiltin)(struct lenv *, struct lval *);

@@ -515,6 +515,7 @@ struct lval *lval_eval(struct lenv *e, struct lval *v)
 	return v;
 }
 
+/* TODO: optimization - if i==0, no need to allocate mem */
 struct lval *lval_pop(struct lval *v, int i)
 {
 	struct lval *x = v->cell[i];
@@ -592,12 +593,7 @@ static struct lval *lval_copy(struct lval *v)
 /* lenv funcs */
 static struct lenv *lenv_new(void)
 {
-	struct lenv *e = xmalloc(sizeof(struct lenv));
-	e->par = NULL;
-	e->count = 0;
-	e->syms = NULL;
-	e->vals = NULL;
-	return e;
+	return xcalloc(sizeof(struct lenv));
 }
 
 static void lenv_free(struct lenv *e)
